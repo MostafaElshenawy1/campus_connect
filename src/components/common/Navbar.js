@@ -19,6 +19,7 @@ import {
   ExitToApp,
   Add as AddIcon,
   Person as PersonIcon,
+  Message as MessageIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../../config/firebase';
@@ -183,6 +184,18 @@ function Navbar({ user }) {
                 >
                   My Listings
                 </Button>
+                <Button
+                  startIcon={<MessageIcon />}
+                  onClick={() => navigate('/messages')}
+                  sx={{
+                    color: 'text.primary',
+                    '&:hover': {
+                      color: 'primary.light',
+                    },
+                  }}
+                >
+                  Messages
+                </Button>
               </>
             )}
           </Box>
@@ -228,6 +241,12 @@ function Navbar({ user }) {
                     <PersonIcon fontSize="small" sx={{ color: 'primary.light' }} />
                   </ListItemIcon>
                   <ListItemText>Profile</ListItemText>
+                </MenuItem>
+                <MenuItem onClick={() => { handleCloseUserMenu(); navigate('/messages'); }}>
+                  <ListItemIcon>
+                    <MessageIcon fontSize="small" sx={{ color: 'primary.light' }} />
+                  </ListItemIcon>
+                  <ListItemText>Messages</ListItemText>
                 </MenuItem>
                 <MenuItem onClick={() => { handleCloseUserMenu(); navigate('/liked-listings'); }}>
                   <ListItemIcon>
