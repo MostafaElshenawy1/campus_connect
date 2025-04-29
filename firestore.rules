@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow anyone to read listings
+    match /listings/{listingId} {
+      allow read: if true;  // Public read access for listings
+      allow create: if request.auth != null;  // Only authenticated users can create
+      allow update: if request.auth != null && (
+        // Allow owners to update their listings
+        resource.data.userId == request.auth.uid ||
+        // Allow any authenticated user to update only likes and likeCount
+        (request.resource.data.diff(resource.data).affectedKeys().hasAll(['likes', 'likeCount']) &&
+         request.resource.data.diff(resource.data).affectedKeys().size() == 2)
+      );
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    // User data rules
+    match /users/{userId} {
+      allow read: if true;  // Allow public reading of user profiles
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
