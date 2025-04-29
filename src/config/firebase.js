@@ -2,16 +2,16 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { getAnalytics } from 'firebase/analytics';
+import { getAnalytics, isSupported } from 'firebase/analytics';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBJE9vi3zBJgJCPPGrZtrhlZQQMHvB7Xd4",
-  authDomain: "campus-connect-11877.firebaseapp.com",
-  projectId: "campus-connect-11877",
-  storageBucket: "campus-connect-11877.firebasestorage.app",
-  messagingSenderId: "379013888917",
-  appId: "1:379013888917:web:51a5c48e1bc49f957c149c",
-  measurementId: "G-RWLFDELDRE"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyBJE9vi3zBJgJCPPGrZtrhlZQQMHvB7Xd4",
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "campus-connect-11877.firebaseapp.com",
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "campus-connect-11877",
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "campus-connect-11877.firebasestorage.app",
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "379013888917",
+  appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:379013888917:web:51a5c48e1bc49f957c149c",
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-RWLFDELDRE"
 };
 
 // Initialize Firebase
@@ -21,7 +21,13 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-export const analytics = getAnalytics(app);
+
+// Initialize Analytics only in browser environment
+let analytics = null;
+if (typeof window !== 'undefined') {
+  isSupported().then(yes => yes && (analytics = getAnalytics(app)));
+}
+export { analytics };
 
 // Initialize Google Auth Provider
 export const googleProvider = new GoogleAuthProvider();
