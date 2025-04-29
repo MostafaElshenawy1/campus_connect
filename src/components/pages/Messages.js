@@ -1,300 +1,442 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Container,
-  Grid,
-  Typography,
   Box,
-  Paper,
-  TextField,
-  Button,
+  Typography,
   List,
   ListItem,
   ListItemText,
   ListItemAvatar,
   Avatar,
   Divider,
-  IconButton,
-  Badge,
-  InputAdornment,
+  TextField,
+  Button,
+  Paper,
   CircularProgress,
-  Alert,
+  Badge,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Stack
 } from '@mui/material';
-import {
-  Send as SendIcon,
-  Search as SearchIcon,
-  MoreVert as MoreVertIcon,
-  AttachFile as AttachFileIcon,
-  EmojiEmotions as EmojiEmotionsIcon,
-} from '@mui/icons-material';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
-import { db, auth } from '../../config/firebase';
+import { Send as SendIcon, AttachMoney as AttachMoneyIcon } from '@mui/icons-material';
+import { getConversations, getMessages, sendMessage, handleOfferResponse } from '../../services/conversations';
+import { formatDistanceToNow } from 'date-fns';
+import { getAuth } from 'firebase/auth';
 
-function Messages() {
-  const [selectedConversation, setSelectedConversation] = useState(null);
-  const [message, setMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+const Messages = () => {
   const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [offerDialogOpen, setOfferDialogOpen] = useState(false);
+  const [offerAmount, setOfferAmount] = useState('');
+  const [selectedMessage, setSelectedMessage] = useState(null);
 
   useEffect(() => {
-    fetchConversations();
+    console.log('Messages component mounted');
+    const auth = getAuth();
+    console.log('Current user:', auth.currentUser?.uid);
+    loadConversations();
+
+    // Set up polling interval for conversations
+    const conversationsInterval = setInterval(() => {
+      loadConversations();
+    }, 5000);
+
+    return () => clearInterval(conversationsInterval);
   }, []);
 
-  const fetchConversations = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (selectedConversation) {
+      console.log('Selected conversation:', selectedConversation);
+      loadMessages(selectedConversation.id);
+
+      const messagesInterval = setInterval(() => {
+        loadMessages(selectedConversation.id);
+      }, 3000);
+
+      return () => clearInterval(messagesInterval);
+    }
+  }, [selectedConversation]);
+
+  const loadConversations = async () => {
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        throw new Error('User must be authenticated');
+      console.log('Loading conversations...');
+      const auth = getAuth();
+      if (!auth.currentUser) {
+        console.log('No authenticated user');
+        return;
+      }
+      console.log('Authenticated user:', auth.currentUser.uid);
+
+      const conversationsData = await getConversations();
+      console.log('Raw conversations data:', conversationsData);
+
+      if (!conversationsData || conversationsData.length === 0) {
+        console.log('No conversations found');
+        setConversations([]);
+        setLoading(false);
+        return;
       }
 
-      const conversationsRef = collection(db, 'conversations');
-      const q = query(
-        conversationsRef,
-        where('participants', 'array-contains', user.uid),
-        orderBy('lastMessageAt', 'desc')
-      );
+      // Sort conversations by last message timestamp
+      const sortedConversations = conversationsData.sort((a, b) => {
+        const timeA = a.lastMessage?.timestamp?.toDate() || new Date(0);
+        const timeB = b.lastMessage?.timestamp?.toDate() || new Date(0);
+        return timeB - timeA;
+      });
 
-      const querySnapshot = await getDocs(q);
-      const fetchedConversations = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        lastMessageAt: doc.data().lastMessageAt?.toDate(),
-      }));
-
-      setConversations(fetchedConversations);
+      console.log('Sorted conversations:', sortedConversations);
+      setConversations(sortedConversations);
+      setLoading(false);
     } catch (error) {
-      console.error('Error fetching conversations:', error);
-      setError('Error loading messages');
-    } finally {
+      console.error('Error loading conversations:', error);
       setLoading(false);
     }
   };
 
-  const formatDate = (date) => {
-    if (!date) return '';
-    const now = new Date();
-    const diff = now - date;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const loadMessages = async (conversationId) => {
+    try {
+      console.log('Loading messages for conversation:', conversationId);
+      const messagesData = await getMessages(conversationId);
+      console.log('Raw messages data:', messagesData);
 
-    if (days === 0) return 'Today';
-    if (days === 1) return 'Yesterday';
-    if (days < 7) return `${days} days ago`;
-    return date.toLocaleDateString();
-  };
+      // Sort messages by timestamp in ascending order
+      const sortedMessages = messagesData.sort((a, b) => {
+        const timeA = a.timestamp?.toDate() || new Date(0);
+        const timeB = b.timestamp?.toDate() || new Date(0);
+        return timeA - timeB;
+      });
 
-  const handleSendMessage = () => {
-    if (message.trim()) {
-      // Here you would typically send the message to your backend
-      console.log('Sending message:', message);
-      setMessage('');
+      console.log('Sorted messages:', sortedMessages);
+      setMessages(sortedMessages);
+    } catch (error) {
+      console.error('Error loading messages:', error);
     }
   };
 
-  const handleKeyPress = (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      handleSendMessage();
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedConversation) return;
+
+    try {
+      await sendMessage(
+        selectedConversation.userId,
+        newMessage.trim(),
+        false,
+        null,
+        selectedConversation.listing?.id
+      );
+      setNewMessage('');
+      loadMessages(selectedConversation.id);
+      loadConversations(); // Refresh conversations to update last message
+    } catch (error) {
+      console.error('Error sending message:', error);
     }
   };
 
-  if (loading) {
+  const handleSendOffer = async () => {
+    if (!offerAmount || !selectedConversation) return;
+
+    try {
+      await sendMessage(
+        selectedConversation.userId,
+        `Offer: $${offerAmount}`,
+        true,
+        parseFloat(offerAmount),
+        selectedConversation.listing?.id
+      );
+      setOfferAmount('');
+      setOfferDialogOpen(false);
+      loadMessages(selectedConversation.id);
+      loadConversations();
+    } catch (error) {
+      console.error('Error sending offer:', error);
+    }
+  };
+
+  const handleOfferResponse = async (messageId, status) => {
+    try {
+      await handleOfferResponse(selectedConversation.id, messageId, status);
+      loadMessages(selectedConversation.id);
+      loadConversations();
+    } catch (error) {
+      console.error('Error handling offer response:', error);
+    }
+  };
+
+  const renderMessage = (message) => {
+    const isCurrentUser = message.senderId === selectedConversation.userId;
+
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+      <Box
+        key={message.id}
+        sx={{
+          display: 'flex',
+          justifyContent: isCurrentUser ? 'flex-start' : 'flex-end',
+          mb: 2
+        }}
+      >
+        <Paper
+          sx={{
+            p: 2,
+            maxWidth: '70%',
+            bgcolor: isCurrentUser ? 'grey.100' : 'primary.main',
+            color: isCurrentUser ? 'text.primary' : 'white'
+          }}
+        >
+          {message.isOffer ? (
+            <Box>
+              <Typography variant="body1">{message.content}</Typography>
+              {message.status === 'pending' && !isCurrentUser && (
+                <Box sx={{ mt: 1 }}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="success"
+                    onClick={() => handleOfferResponse(message.id, 'accepted')}
+                    sx={{ mr: 1 }}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="error"
+                    onClick={() => handleOfferResponse(message.id, 'rejected')}
+                  >
+                    Reject
+                  </Button>
+                </Box>
+              )}
+              {message.status && (
+                <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+                  Status: {message.status}
+                </Typography>
+              )}
+            </Box>
+          ) : (
+            <Typography variant="body1">{message.content}</Typography>
+          )}
+          <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+            {formatDistanceToNow(message.timestamp?.toDate() || new Date(), { addSuffix: true })}
+          </Typography>
+        </Paper>
+      </Box>
+    );
+  };
+
+  const renderConversationItem = (conversation) => {
+    const lastMessage = conversation.lastMessage;
+    const timestamp = lastMessage?.timestamp?.toDate();
+    const listingImage = conversation.listing?.images?.[0];
+    const listingTitle = conversation.listing?.title || 'Unknown Item';
+    const sellerName = conversation.user?.displayName || 'Unknown User';
+
+    return (
+      <ListItem
+        key={conversation.id}
+        button
+        selected={selectedConversation?.id === conversation.id}
+        onClick={() => setSelectedConversation(conversation)}
+        sx={{
+          mb: 1,
+          borderRadius: 1,
+          '&:hover': {
+            backgroundColor: 'rgba(0, 0, 0, 0.04)',
+          },
+          '&.Mui-selected': {
+            backgroundColor: 'rgba(0, 0, 0, 0.08)',
+            '&:hover': {
+              backgroundColor: 'rgba(0, 0, 0, 0.12)',
+            },
+          },
+        }}
+      >
+        <ListItemAvatar>
+          <Badge
+            badgeContent={conversation.unreadCount}
+            color="primary"
+            invisible={!conversation.unreadCount}
+          >
+            <Avatar
+              src={listingImage}
+              alt={listingTitle}
+              variant="rounded"
+              sx={{ width: 56, height: 56 }}
+            />
+          </Badge>
+        </ListItemAvatar>
+        <ListItemText
+          primary={
+            <Stack direction="column" spacing={0.5}>
+              <Typography variant="subtitle1" component="div" noWrap>
+                {listingTitle}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {sellerName}
+              </Typography>
+            </Stack>
+          }
+          secondary={
+            lastMessage ? (
+              <>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  noWrap
+                  sx={{
+                    maxWidth: '200px',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 1,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {lastMessage.content}
+                </Typography>
+                {timestamp && (
+                  <Typography variant="caption" color="text.secondary">
+                    {formatDistanceToNow(timestamp, { addSuffix: true })}
+                  </Typography>
+                )}
+              </>
+            ) : 'No messages yet'
+          }
+          sx={{ ml: 2 }}
+        />
+      </ListItem>
+    );
+  };
+
+  if (loading && !selectedConversation) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
     );
   }
 
-  if (error) {
-    return (
-      <Container maxWidth="lg">
-        <Box sx={{ my: 4 }}>
-          <Alert severity="error">{error}</Alert>
-        </Box>
-      </Container>
-    );
-  }
-
   return (
-    <Container maxWidth="lg" sx={{ height: 'calc(100vh - 200px)' }}>
-      <Grid container spacing={2} sx={{ height: '100%' }}>
-        {/* Conversations List */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2 }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
+      {/* Conversations List */}
+      <Paper
+        sx={{
+          width: 320,
+          borderRight: 1,
+          borderColor: 'divider',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+      >
+        <Typography variant="h6" sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+          Messages
+        </Typography>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : (
+          <List sx={{ flex: 1, overflow: 'auto', px: 2 }}>
+            {conversations.map(renderConversationItem)}
+          </List>
+        )}
+      </Paper>
+
+      {/* Messages Area */}
+      {selectedConversation ? (
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {/* Conversation Header */}
+          <Paper sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Avatar
+                src={selectedConversation.listing?.images?.[0]}
+                alt={selectedConversation.listing?.title}
+                variant="rounded"
+                sx={{ width: 48, height: 48 }}
+              />
+              <Stack direction="column">
+                <Typography variant="h6">
+                  {selectedConversation.listing?.title || 'Unknown Item'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {selectedConversation.user?.displayName || 'Unknown User'}
+                </Typography>
+              </Stack>
+            </Stack>
+          </Paper>
+
+          {/* Messages List */}
+          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+            {messages.map(renderMessage)}
+          </Box>
+
+          {/* Message Input */}
+          <Paper sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Stack direction="row" spacing={2}>
               <TextField
                 fullWidth
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
+                placeholder="Type a message..."
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                size="small"
               />
-            </Box>
-            <List sx={{ flexGrow: 1, overflow: 'auto' }}>
-              {conversations.map((conversation) => (
-                <React.Fragment key={conversation.id}>
-                  <ListItem
-                    button
-                    selected={selectedConversation?.id === conversation.id}
-                    onClick={() => setSelectedConversation(conversation)}
-                  >
-                    <ListItemAvatar>
-                      <Badge
-                        color="success"
-                        variant="dot"
-                        invisible={!conversation.user.online}
-                      >
-                        <Avatar src={conversation.user.avatar} />
-                      </Badge>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <Typography variant="subtitle1">
-                            {conversation.user.name}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {formatDate(conversation.lastMessageAt)}
-                          </Typography>
-                        </Box>
-                      }
-                      secondary={
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <Typography
-                            variant="body2"
-                            color="text.secondary"
-                            sx={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              maxWidth: '200px',
-                            }}
-                          >
-                            {conversation.lastMessage}
-                          </Typography>
-                          {conversation.unread > 0 && (
-                            <Badge
-                              badgeContent={conversation.unread}
-                              color="primary"
-                              sx={{ ml: 1 }}
-                            />
-                          )}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                  <Divider />
-                </React.Fragment>
-              ))}
-            </List>
-          </Paper>
-        </Grid>
-
-        {/* Chat Area */}
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            {selectedConversation ? (
-              <>
-                {/* Chat Header */}
-                <Box
-                  sx={{
-                    p: 2,
-                    borderBottom: 1,
-                    borderColor: 'divider',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Avatar
-                    src={selectedConversation.user.avatar}
-                    sx={{ mr: 2 }}
-                  />
-                  <Box sx={{ flexGrow: 1 }}>
-                    <Typography variant="subtitle1">
-                      {selectedConversation.user.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {selectedConversation.listing.title} • ${selectedConversation.listing.price}
-                    </Typography>
-                  </Box>
-                  <IconButton>
-                    <MoreVertIcon />
-                  </IconButton>
-                </Box>
-
-                {/* Messages */}
-                <Box
-                  sx={{
-                    flexGrow: 1,
-                    overflow: 'auto',
-                    p: 2,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
-                  }}
-                >
-                  {/* Add your message rendering logic here */}
-                </Box>
-
-                {/* Message Input */}
-                <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-                  <TextField
-                    fullWidth
-                    multiline
-                    maxRows={4}
-                    placeholder="Type a message..."
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    InputProps={{
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          <IconButton>
-                            <EmojiEmotionsIcon />
-                          </IconButton>
-                          <IconButton>
-                            <AttachFileIcon />
-                          </IconButton>
-                          <IconButton
-                            color="primary"
-                            onClick={handleSendMessage}
-                            disabled={!message.trim()}
-                          >
-                            <SendIcon />
-                          </IconButton>
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Box>
-              </>
-            ) : (
-              <Box
-                sx={{
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
+              <Button
+                variant="contained"
+                onClick={() => setOfferDialogOpen(true)}
+                startIcon={<AttachMoneyIcon />}
               >
-                <Typography variant="h6" color="text.secondary">
-                  Select a conversation to start messaging
-                </Typography>
-              </Box>
-            )}
+                Make Offer
+              </Button>
+              <IconButton color="primary" onClick={handleSendMessage}>
+                <SendIcon />
+              </IconButton>
+            </Stack>
           </Paper>
-        </Grid>
-      </Grid>
-    </Container>
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            bgcolor: 'grey.100'
+          }}
+        >
+          <Typography variant="h6" color="text.secondary">
+            Select a conversation to start messaging
+          </Typography>
+        </Box>
+      )}
+
+      {/* Offer Dialog */}
+      <Dialog open={offerDialogOpen} onClose={() => setOfferDialogOpen(false)}>
+        <DialogTitle>Make an Offer</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Offer Amount ($)"
+            type="number"
+            fullWidth
+            value={offerAmount}
+            onChange={(e) => setOfferAmount(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOfferDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSendOffer} variant="contained" color="primary">
+            Send Offer
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
-}
+};
 
 export default Messages;

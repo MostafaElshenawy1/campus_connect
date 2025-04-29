@@ -1,26 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow anyone to read listings
-    match /listings/{listingId} {
-      allow read: if true;  // Public read access for listings
-      allow create: if request.auth != null;  // Only authenticated users can create
-      allow update: if request.auth != null && (
-        // Allow owners to update their listings
-        resource.data.userId == request.auth.uid ||
-        // Allow any authenticated user to update only likes and likeCount
-        (request.resource.data.diff(resource.data).affectedKeys().hasAll(['likes', 'likeCount']) &&
-         request.resource.data.diff(resource.data).affectedKeys().size() == 2)
-      );
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
 
-    // User data rules
+    // Helper function to check if user is a participant in the conversation
+    function isParticipant(conversationId) {
+      let conversation = get(/databases/$(database)/documents/conversations/$(conversationId));
+      return isAuthenticated() && (
+        !exists(/databases/$(database)/documents/conversations/$(conversationId)) ||
+        conversation.data.participants.hasAny([request.auth.uid])
+      );
+    }
+
+    // Conversations collection
+    match /conversations/{conversationId} {
+      // Allow creating if user is authenticated
+      allow create: if isAuthenticated();
+
+      // Allow reading if user is authenticated
+      allow read: if isAuthenticated();
+
+      // Allow updating if user is authenticated
+      allow update: if isAuthenticated();
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow create: if isAuthenticated();
+        allow read: if isAuthenticated();
+        allow update: if isAuthenticated();
+      }
+    }
+
+    // Users collection
     match /users/{userId} {
-      allow read: if true;  // Allow public reading of user profiles
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Listings collection
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() &&
+                             (
+                               // Allow if user is the owner
+                               resource.data.userId == request.auth.uid ||
+                               // Or if updating specific fields like likes
+                               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'sold', 'soldTo', 'soldAt'])
+                             );
     }
   }
 }

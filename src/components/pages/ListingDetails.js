@@ -42,6 +42,7 @@ import { db, auth } from '../../config/firebase';
 import { useNavigate, useParams } from 'react-router-dom';
 import { handleLike, getLikeCount, formatLikeCount, checkIfLiked } from '../../services/likes';
 import ListingImageSlider from '../common/ListingImageSlider';
+import { sendMessage } from '../../services/messages';
 
 // Styled components for image transitions
 const ImageContainer = styled(Box)({
@@ -85,7 +86,9 @@ function ListingDetails() {
   const [error, setError] = useState(null);
   const [isLiked, setIsLiked] = useState(false);
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [message, setMessage] = useState('');
+  const [offerAmount, setOfferAmount] = useState('');
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -201,16 +204,86 @@ function ListingDetails() {
 
   const handleSendMessage = async () => {
     if (!auth.currentUser) {
+      console.log('User not authenticated, redirecting to signin');
       navigate('/signin');
       return;
     }
 
+    if (!message.trim()) {
+      setError('Please enter a message');
+      return;
+    }
+
     try {
-      // Implement your message sending logic here
+      console.log('Starting to send message...');
+      console.log('Auth state:', {
+        currentUser: auth.currentUser?.uid,
+        isAuthenticated: !!auth.currentUser
+      });
+      console.log('Message details:', {
+        sellerId: listing.userId,
+        message: message.trim(),
+        listingId: listing.id
+      });
+
+      const result = await sendMessage(
+        listing.userId,
+        message.trim(),
+        false,
+        null,
+        listing.id
+      );
+
+      console.log('Message sent successfully:', result);
       setMessageDialogOpen(false);
       setMessage('');
+      navigate('/messages');
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error sending message:', {
+        code: error.code,
+        message: error.message,
+        details: error.details
+      });
+      setError(error.message || 'Failed to send message. Please try again.');
+    }
+  };
+
+  const handleSendOffer = async () => {
+    if (!auth.currentUser) {
+      navigate('/signin');
+      return;
+    }
+
+    if (!offerAmount || isNaN(offerAmount) || parseFloat(offerAmount) <= 0) {
+      setError('Please enter a valid offer amount');
+      return;
+    }
+
+    try {
+      console.log('Starting to send offer...');
+      console.log('Current user:', auth.currentUser?.uid);
+      console.log('Seller ID:', listing.userId);
+      console.log('Offer amount:', offerAmount);
+      console.log('Listing ID:', listing.id);
+
+      const result = await sendMessage(
+        listing.userId, // receiverId
+        `Offer: $${offerAmount}`, // content
+        true, // isOffer
+        parseFloat(offerAmount), // offerAmount
+        listing.id // listingId
+      );
+
+      console.log('Offer sent successfully:', result);
+      setOfferDialogOpen(false);
+      setOfferAmount('');
+      setMessage('');
+
+      // Navigate to messages after sending
+      navigate('/messages');
+    } catch (error) {
+      console.error('Error sending offer:', error);
+      setError('Failed to send offer. Please try again.');
     }
   };
 
@@ -356,13 +429,23 @@ function ListingDetails() {
                 </Button>
               </Stack>
             ) : (
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={() => setMessageDialogOpen(true)}
-              >
-                Contact Seller
-              </Button>
+              <Stack spacing={2}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  fullWidth
+                  onClick={() => setOfferDialogOpen(true)}
+                >
+                  Send an Offer
+                </Button>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => setMessageDialogOpen(true)}
+                >
+                  Message Seller
+                </Button>
+              </Stack>
             )}
           </Paper>
         </Grid>
@@ -388,6 +471,39 @@ function ListingDetails() {
           <Button onClick={() => setMessageDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleSendMessage} variant="contained">
             Send
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Offer Dialog */}
+      <Dialog open={offerDialogOpen} onClose={() => setOfferDialogOpen(false)}>
+        <DialogTitle>Make an Offer</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Offer Amount ($)"
+            type="number"
+            fullWidth
+            value={offerAmount}
+            onChange={(e) => setOfferAmount(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Additional Message (Optional)"
+            type="text"
+            fullWidth
+            multiline
+            rows={3}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOfferDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleSendOffer} variant="contained" color="primary">
+            Send Offer
           </Button>
         </DialogActions>
       </Dialog>

@@ -11,12 +11,13 @@ import Groups from './components/pages/Groups';
 import ListingDetails from './components/pages/ListingDetails';
 import MyListings from './components/pages/MyListings';
 import LikedListings from './components/pages/LikedListings';
-import { onAuthStateChange } from './services/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import Login from './components/Login';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import { initializeLikeCount } from './utils/initializeLikeCount';
 import theme from './theme';
 import Navbar from './components/common/Navbar';
+import { auth } from './config/firebase';
 
 // Create a wrapper component to handle the Navbar visibility
 function AppContent({ user }) {
@@ -101,7 +102,7 @@ function AppContent({ user }) {
             }
           />
           <Route
-            path="/messages"
+            path="/messages/*"
             element={
               <ProtectedRoute user={user}>
                 <Messages />
@@ -149,7 +150,8 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChange((user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('Auth state changed:', user ? 'User logged in' : 'User logged out');
       setUser(user);
       setLoading(false);
     });
