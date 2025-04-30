@@ -66,6 +66,23 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
     // If conversation doesn't exist, create it first
     if (!conversationDoc.exists()) {
       console.log('Creating new conversation');
+
+      // Get the receiver's user data
+      const receiverDoc = await getDoc(doc(db, 'users', receiverId));
+      const receiverData = receiverDoc.exists() ? receiverDoc.data() : null;
+
+      // Get the listing data if available
+      let listingData = null;
+      if (listingId) {
+        const listingDoc = await getDoc(doc(db, 'listings', listingId));
+        if (listingDoc.exists()) {
+          listingData = {
+            id: listingId,
+            ...listingDoc.data()
+          };
+        }
+      }
+
       const conversationData = {
         participants: [senderId, receiverId],
         createdAt: serverTimestamp(),
@@ -73,7 +90,9 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
         lastMessage: messageData,
         listingId: listingId,
         [`unreadCount_${receiverId}`]: 1,
-        [`unreadCount_${senderId}`]: 0
+        [`unreadCount_${senderId}`]: 0,
+        user: receiverData,
+        listing: listingData
       };
       console.log('New conversation data:', conversationData);
 

@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { Send as SendIcon, AttachMoney as MoneyIcon } from '@mui/icons-material';
 import { getMessages, sendMessage, handleOfferResponse, markMessageAsRead } from '../../services/messages';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { auth } from '../../config/firebase';
 
@@ -185,7 +185,48 @@ const Conversation = () => {
 
   const handleOfferResponse = async (messageId, accept) => {
     try {
-      await handleOfferResponse(messageId, accept);
+      const messageRef = doc(db, 'messages', messageId);
+      const messageDoc = await getDoc(messageRef);
+
+      if (!messageDoc.exists()) {
+        throw new Error('Message not found');
+      }
+
+      const messageData = messageDoc.data();
+      const offerAmount = messageData.offerAmount;
+
+      if (accept) {
+        // Create a new message indicating acceptance
+        await addDoc(collection(db, 'messages'), {
+          conversationId: messageData.conversationId,
+          senderId: auth.currentUser.uid,
+          receiverId: messageData.senderId,
+          content: `Accepted offer of $${offerAmount}`,
+          timestamp: serverTimestamp(),
+          type: 'offer_response',
+          accepted: true,
+          offerAmount: offerAmount
+        });
+      } else {
+        // Create a new message indicating rejection
+        await addDoc(collection(db, 'messages'), {
+          conversationId: messageData.conversationId,
+          senderId: auth.currentUser.uid,
+          receiverId: messageData.senderId,
+          content: `Rejected offer of $${offerAmount}`,
+          timestamp: serverTimestamp(),
+          type: 'offer_response',
+          accepted: false,
+          offerAmount: offerAmount
+        });
+      }
+
+      // Update the original offer message to mark it as responded
+      await updateDoc(messageRef, {
+        responded: true,
+        response: accept ? 'accepted' : 'rejected'
+      });
+
     } catch (error) {
       console.error('Error handling offer response:', error);
     }

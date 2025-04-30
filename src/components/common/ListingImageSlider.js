@@ -49,11 +49,11 @@ const ImageDots = styled(Box)({
   zIndex: 2,
 });
 
-const Dot = styled(Box)(({ active }) => ({
+const Dot = styled('div')(({ theme, $active }) => ({
   width: '8px',
   height: '8px',
   borderRadius: '50%',
-  backgroundColor: active ? '#fff' : 'rgba(255, 255, 255, 0.5)',
+  backgroundColor: $active ? '#fff' : 'rgba(255, 255, 255, 0.5)',
   transition: 'background-color 0.3s ease',
   cursor: 'pointer',
   '&:hover': {
@@ -150,7 +150,7 @@ function ListingImageSlider({
           {images.map((_, index) => (
             <Dot
               key={index}
-              active={index === currentImageIndex}
+              $active={index === currentImageIndex}
               onClick={(e) => handleDotClick(index, e)}
             />
           ))}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -26,161 +26,360 @@ import { Send as SendIcon, AttachMoney as AttachMoneyIcon, ArrowBack as ArrowBac
 import { getConversations, getMessages, sendMessage, handleOfferResponse } from '../../services/conversations';
 import { formatDistanceToNow } from 'date-fns';
 import { getAuth } from 'firebase/auth';
+import {
+  onSnapshot,
+  collection,
+  query,
+  where,
+  orderBy,
+  doc,
+  getDoc,
+  writeBatch
+} from 'firebase/firestore';
+import { db } from '../../config/firebase';
 
 const Messages = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [allMessages, setAllMessages] = useState({});
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
+  const [additionalMessage, setAdditionalMessage] = useState('');
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [counterOfferDialogOpen, setCounterOfferDialogOpen] = useState(false);
+  const [selectedOfferMessage, setSelectedOfferMessage] = useState(null);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
 
   useEffect(() => {
-    console.log('Messages component mounted');
     const auth = getAuth();
-    console.log('Current user:', auth.currentUser?.uid);
-    loadConversations();
+    if (!auth.currentUser) return;
 
-    // Set up polling interval for conversations
-    const conversationsInterval = setInterval(() => {
-      loadConversations();
-    }, 5000);
+    // Set initial loading state only if we haven't loaded any conversations yet
+    if (conversations.length === 0) {
+      setLoading(true);
+    }
 
-    return () => clearInterval(conversationsInterval);
+    // Set up real-time listener for conversations
+    const conversationsQuery = query(
+      collection(db, 'conversations'),
+      where('participants', 'array-contains', auth.currentUser.uid),
+      orderBy('updatedAt', 'desc')
+    );
+
+    const unsubscribeConversations = onSnapshot(conversationsQuery, async (snapshot) => {
+      try {
+        console.log('Conversations snapshot:', snapshot.docs.length, 'documents');
+
+        // Process any changes in conversations
+        const conversationsData = await Promise.all(snapshot.docs.map(async docSnapshot => {
+          const data = docSnapshot.data();
+          console.log('Conversation data:', data);
+
+          // If user or listing data is not in the document, fetch it
+          let userData = data.user;
+          let listingData = data.listing;
+
+          if (!userData && data.participants) {
+            const otherUserId = data.participants.find(id => id !== auth.currentUser.uid);
+            if (otherUserId) {
+              const userDoc = await getDoc(doc(db, 'users', otherUserId));
+              if (userDoc.exists()) {
+                userData = userDoc.data();
+              }
+            }
+          }
+
+          if (!listingData && data.listingId) {
+            const listingDoc = await getDoc(doc(db, 'listings', data.listingId));
+            if (listingDoc.exists()) {
+              listingData = {
+                id: data.listingId,
+                ...listingDoc.data()
+              };
+            }
+          }
+
+          return {
+            id: docSnapshot.id,
+            userId: data.participants.find(id => id !== auth.currentUser.uid),
+            lastMessage: data.lastMessage || { content: '', timestamp: null },
+            unreadCount: data[`unreadCount_${auth.currentUser.uid}`] || 0,
+            listing: listingData || null,
+            user: userData || null,
+            updatedAt: data.updatedAt
+          };
+        }));
+
+        console.log('Processed conversations:', conversationsData);
+        setConversations(conversationsData);
+        setInitialLoadComplete(true);
+      } catch (error) {
+        console.error('Error in conversations listener:', error);
+      } finally {
+        // Only set loading to false if this was the initial load
+        if (loading) {
+          setLoading(false);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeConversations();
+    };
   }, []);
 
   useEffect(() => {
-    if (selectedConversation) {
-      console.log('Selected conversation:', selectedConversation);
-      loadMessages(selectedConversation.id);
+    if (!selectedConversation) return;
 
-      const messagesInterval = setInterval(() => {
-        loadMessages(selectedConversation.id);
-      }, 3000);
+    // Set up real-time listener for messages in the selected conversation
+    const messagesQuery = query(
+      collection(db, `conversations/${selectedConversation.id}/messages`),
+      orderBy('timestamp', 'asc')
+    );
 
-      return () => clearInterval(messagesInterval);
-    }
-  }, [selectedConversation]);
+    const unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
+      const messagesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
 
-  const loadConversations = async () => {
-    try {
-      console.log('Loading conversations...');
+      // Update both messages state and allMessages cache
+      setMessages(messagesData);
+      setAllMessages(prev => ({
+        ...prev,
+        [selectedConversation.id]: messagesData
+      }));
+
+      // Mark messages as read if they're not from the current user
       const auth = getAuth();
-      if (!auth.currentUser) {
-        console.log('No authenticated user');
-        setConversations([]);
-        setLoading(false);
-        return;
+      const unreadMessages = messagesData.filter(
+        msg => msg.receiverId === auth.currentUser?.uid && !msg.read
+      );
+
+      if (unreadMessages.length > 0) {
+        const batch = writeBatch(db);
+        unreadMessages.forEach(msg => {
+          const messageRef = doc(db, `conversations/${selectedConversation.id}/messages/${msg.id}`);
+          batch.update(messageRef, { read: true });
+        });
+        batch.update(doc(db, 'conversations', selectedConversation.id), {
+          [`unreadCount_${auth.currentUser?.uid}`]: 0
+        });
+        batch.commit().catch(error => {
+          console.error('Error marking messages as read:', error);
+        });
       }
+    });
 
-      const conversationsData = await getConversations();
-
-      if (!conversationsData || conversationsData.length === 0) {
-        console.log('No conversations found');
-        setConversations([]);
-        setLoading(false);
-        return;
-      }
-
-      // Sort conversations by last message timestamp
-      const sortedConversations = conversationsData.sort((a, b) => {
-        const timeA = a.lastMessage?.timestamp?.toDate() || new Date(0);
-        const timeB = b.lastMessage?.timestamp?.toDate() || new Date(0);
-        return timeB - timeA; // Most recent first
-      });
-
-      setConversations(sortedConversations);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading conversations:', error);
-      setError(`Error loading conversations: ${error.message}`);
-      setLoading(false);
-    }
-  };
+    return () => {
+      unsubscribeMessages();
+    };
+  }, [selectedConversation?.id]);
 
   const loadMessages = async (conversationId) => {
     try {
-      console.log('Loading messages for conversation:', conversationId);
+      if (!isSwitchingConversation) {
+        setLoading(true);
+      }
+
       const messagesData = await getMessages(conversationId);
-      console.log('Raw messages data:', messagesData);
-
-      // Sort messages by timestamp in ascending order
-      const sortedMessages = messagesData.sort((a, b) => {
-        const timeA = a.timestamp?.toDate() || new Date(0);
-        const timeB = b.timestamp?.toDate() || new Date(0);
-        return timeA - timeB;
-      });
-
-      console.log('Sorted messages:', sortedMessages);
-      setMessages(sortedMessages);
+      setMessages(messagesData);
+      setAllMessages(prev => ({
+        ...prev,
+        [conversationId]: messagesData
+      }));
     } catch (error) {
       console.error('Error loading messages:', error);
+    } finally {
+      if (!isSwitchingConversation) {
+        setLoading(false);
+      }
     }
   };
+
+  const scrollToBottom = (behavior = 'smooth') => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    }
+  };
+
+  // Auto scroll when messages update
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages]);
+
+  // Scroll to bottom on conversation change
+  useEffect(() => {
+    if (selectedConversation) {
+      scrollToBottom('auto');
+    }
+  }, [selectedConversation]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation) return;
 
     try {
+      // Clear the input field immediately for better UX
+      const messageContent = newMessage.trim();
+      setNewMessage('');
+
       await sendMessage(
         selectedConversation.userId,
-        newMessage.trim(),
+        messageContent,
         false,
         null,
         selectedConversation.listing?.id
       );
-      setNewMessage('');
-      loadMessages(selectedConversation.id);
-      loadConversations(); // Refresh conversations to update last message
+
+      // Scroll to bottom after sending
+      scrollToBottom();
     } catch (error) {
       console.error('Error sending message:', error);
+      setError('Failed to send message');
     }
   };
 
   const handleSendOffer = async () => {
-    if (!offerAmount || !selectedConversation) return;
+    if (!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0) return;
 
     try {
+      const messageContent = additionalMessage
+        ? `Offer: $${parseFloat(offerAmount).toFixed(2)}\n${additionalMessage}`
+        : `Offer: $${parseFloat(offerAmount).toFixed(2)}`;
+
+      // Clear the input fields immediately for better UX
+      const amount = offerAmount;
+      const message = additionalMessage;
+      setOfferAmount('');
+      setAdditionalMessage('');
+      setOfferDialogOpen(false);
+
       await sendMessage(
         selectedConversation.userId,
-        `Offer: $${offerAmount}`,
+        messageContent,
         true,
-        parseFloat(offerAmount),
+        parseFloat(amount),
         selectedConversation.listing?.id
       );
-      setOfferAmount('');
-      setOfferDialogOpen(false);
-      loadMessages(selectedConversation.id);
-      loadConversations();
+
+      // Scroll to bottom after sending offer
+      scrollToBottom();
     } catch (error) {
       console.error('Error sending offer:', error);
+      setError('Failed to send offer');
     }
   };
 
-  const handleOfferResponse = async (messageId, status) => {
+  const respondToOffer = async (messageId, status) => {
     try {
       await handleOfferResponse(selectedConversation.id, messageId, status);
-      loadMessages(selectedConversation.id);
-      loadConversations();
     } catch (error) {
       console.error('Error handling offer response:', error);
     }
   };
 
+  const handleRescindOffer = async (messageId) => {
+    try {
+      // Update UI immediately
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === messageId
+            ? { ...msg, status: 'rescinded' }
+            : msg
+        )
+      );
+
+      // Make the API call
+      await respondToOffer(messageId, 'rescinded');
+    } catch (error) {
+      // Revert the status on error
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === messageId
+            ? { ...msg, status: 'pending' }
+            : msg
+        )
+      );
+      console.error('Error rescinding offer:', error);
+    }
+  };
+
+  const handleCounterOffer = (message) => {
+    setSelectedOfferMessage(message);
+    setCounterOfferDialogOpen(true);
+  };
+
+  const handleSelectConversation = (conversation) => {
+    // Set flag to indicate we're switching conversations
+    setIsSwitchingConversation(true);
+
+    // Use cached messages if available
+    if (allMessages[conversation.id]) {
+      setMessages(allMessages[conversation.id]);
+    } else {
+      setMessages([]);
+    }
+
+    // Set the selected conversation
+    setSelectedConversation(conversation);
+
+    // Reset the flag after a short delay to allow the UI to update
+    setTimeout(() => {
+      setIsSwitchingConversation(false);
+    }, 100);
+  };
+
   const renderMessage = (message) => {
-    const isCurrentUser = message.senderId === selectedConversation.userId;
+    const isCurrentUser = message.senderId === getAuth().currentUser.uid;
+    const isOffer = message.isOffer;
+    const isPending = message.status === 'pending';
+    const isRescinded = message.status === 'rescinded';
+    const isAccepted = message.status === 'accepted';
+    const isRejected = message.status === 'rejected';
+
+    const getStatusColor = (status) => {
+      switch (status) {
+        case 'accepted':
+          return 'success.main';
+        case 'rejected':
+          return 'error.main';
+        case 'rescinded':
+          return 'text.secondary';
+        default:
+          return isCurrentUser ? 'text.secondary' : 'rgba(255, 255, 255, 0.7)';
+      }
+    };
+
+    const getStatusText = (status) => {
+      switch (status) {
+        case 'accepted':
+          return 'Offer accepted';
+        case 'rejected':
+          return 'Offer rejected';
+        case 'rescinded':
+          return 'Offer rescinded';
+        default:
+          return `Offer ${status}`;
+      }
+    };
 
     return (
       <Box
         key={message.id}
         sx={{
           display: 'flex',
-          justifyContent: isCurrentUser ? 'flex-start' : 'flex-end',
+          justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
           mb: 2
         }}
       >
@@ -189,43 +388,106 @@ const Messages = () => {
             p: 2,
             maxWidth: '70%',
             bgcolor: isCurrentUser ? 'grey.100' : 'primary.main',
-            color: isCurrentUser ? 'text.primary' : 'white'
+            color: isCurrentUser ? 'text.primary' : 'white',
+            borderRadius: 2,
+            opacity: isRescinded ? 0.7 : 1,
           }}
         >
-          {message.isOffer ? (
+          {isOffer ? (
             <Box>
-              <Typography variant="body1">{message.content}</Typography>
-              {message.status === 'pending' && !isCurrentUser && (
+              <Typography
+                variant="body1"
+                gutterBottom
+                sx={{
+                  textDecoration: isRescinded ? 'line-through' : 'none',
+                }}
+              >
+                {message.content}
+              </Typography>
+
+              {isPending && (
                 <Box sx={{ mt: 1 }}>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color="success"
-                    onClick={() => handleOfferResponse(message.id, 'accepted')}
-                    sx={{ mr: 1 }}
-                  >
-                    Accept
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color="error"
-                    onClick={() => handleOfferResponse(message.id, 'rejected')}
-                  >
-                    Reject
-                  </Button>
+                  {isCurrentUser ? (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="error"
+                      onClick={() => handleRescindOffer(message.id)}
+                      sx={{
+                        bgcolor: 'error.main',
+                        '&:hover': { bgcolor: 'error.dark' }
+                      }}
+                    >
+                      Rescind Offer
+                    </Button>
+                  ) : (
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="success"
+                        onClick={() => respondToOffer(message.id, 'accepted')}
+                        sx={{
+                          bgcolor: 'success.main',
+                          '&:hover': { bgcolor: 'success.dark' }
+                        }}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        onClick={() => handleCounterOffer(message)}
+                        sx={{
+                          bgcolor: 'primary.main',
+                          '&:hover': { bgcolor: 'primary.dark' }
+                        }}
+                      >
+                        Counter
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="error"
+                        onClick={() => respondToOffer(message.id, 'rejected')}
+                        sx={{
+                          bgcolor: 'error.main',
+                          '&:hover': { bgcolor: 'error.dark' }
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </Stack>
+                  )}
                 </Box>
               )}
-              {message.status && (
-                <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
-                  Status: {message.status}
+
+              {!isPending && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    mt: 1,
+                    display: 'block',
+                    color: getStatusColor(message.status),
+                    fontStyle: 'italic'
+                  }}
+                >
+                  {getStatusText(message.status)}
                 </Typography>
               )}
             </Box>
           ) : (
             <Typography variant="body1">{message.content}</Typography>
           )}
-          <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>
+          <Typography
+            variant="caption"
+            sx={{
+              mt: 1,
+              display: 'block',
+              color: isCurrentUser ? 'text.secondary' : 'rgba(255, 255, 255, 0.7)'
+            }}
+          >
             {formatDistanceToNow(message.timestamp?.toDate() || new Date(), { addSuffix: true })}
           </Typography>
         </Paper>
@@ -245,21 +507,26 @@ const Messages = () => {
         key={conversation.id}
         button
         selected={selectedConversation?.id === conversation.id}
-        onClick={() => {
-          setSelectedConversation(conversation);
-        }}
+        onClick={() => handleSelectConversation(conversation)}
         sx={{
           py: 2,
           px: { xs: 3, sm: 2 },
           borderBottom: '1px solid',
           borderColor: 'divider',
+          transition: 'all 0.2s ease',
           '&:hover': {
             backgroundColor: 'rgba(0, 0, 0, 0.04)',
           },
           '&.Mui-selected': {
-            backgroundColor: 'rgba(0, 0, 0, 0.08)',
+            backgroundColor: 'primary.main',
             '&:hover': {
-              backgroundColor: 'rgba(0, 0, 0, 0.12)',
+              backgroundColor: 'primary.dark',
+            },
+            '& .MuiTypography-root': {
+              color: 'white',
+            },
+            '& .MuiTypography-colorTextSecondary': {
+              color: 'rgba(255, 255, 255, 0.7)',
             },
           },
         }}
@@ -276,6 +543,8 @@ const Messages = () => {
                 minWidth: 20,
                 height: 20,
                 fontSize: '0.75rem',
+                right: -4,
+                top: -4,
               },
             }}
           >
@@ -287,6 +556,8 @@ const Messages = () => {
                 width: 50,
                 height: 50,
                 borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
               }}
             />
           </Badge>
@@ -296,21 +567,26 @@ const Messages = () => {
             <Box sx={{ mb: 0.5 }}>
               <Typography
                 variant="subtitle1"
-                component="div"
+                component="span"
                 noWrap
                 sx={{
                   fontWeight: conversation.unreadCount ? 600 : 400,
                   color: conversation.unreadCount ? 'text.primary' : 'text.secondary',
+                  display: 'block',
+                  fontSize: '0.95rem',
                 }}
               >
                 {listingTitle}
               </Typography>
               <Typography
                 variant="body2"
+                component="span"
                 color="text.secondary"
                 sx={{
                   fontSize: '0.8125rem',
                   fontWeight: conversation.unreadCount ? 500 : 400,
+                  display: 'block',
+                  mt: 0.5,
                 }}
               >
                 {sellerName}
@@ -322,6 +598,7 @@ const Messages = () => {
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
                 <Typography
                   variant="body2"
+                  component="span"
                   sx={{
                     color: conversation.unreadCount ? 'text.primary' : 'text.secondary',
                     fontWeight: conversation.unreadCount ? 500 : 400,
@@ -330,6 +607,7 @@ const Messages = () => {
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
+                    display: 'block',
                   }}
                 >
                   {lastMessage.content}
@@ -337,6 +615,7 @@ const Messages = () => {
                 {timestamp && (
                   <Typography
                     variant="caption"
+                    component="span"
                     sx={{
                       color: 'text.secondary',
                       fontSize: '0.75rem',
@@ -349,7 +628,15 @@ const Messages = () => {
                   </Typography>
                 )}
               </Box>
-            ) : 'No messages yet'
+            ) : (
+              <Typography
+                variant="body2"
+                component="span"
+                color="text.secondary"
+              >
+                No messages yet
+              </Typography>
+            )
           }
         />
       </ListItem>
@@ -360,7 +647,26 @@ const Messages = () => {
     setSelectedConversation(null);
   };
 
-  if (loading) {
+  const renderMessages = () => {
+    if (loading && !messages.length) {
+      return (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100%'
+          }}
+        >
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    return messages.map(renderMessage);
+  };
+
+  if (loading && !initialLoadComplete) {
     return (
       <Box sx={{
         display: 'flex',
@@ -377,231 +683,595 @@ const Messages = () => {
   return (
     <Box sx={{
       display: 'flex',
-      height: { xs: 'calc(100vh - 56px)', sm: 'calc(100vh - 64px)' },
-      position: 'relative',
+      position: 'fixed',
+      top: { xs: '56px', sm: '64px' },
+      bottom: 0,
+      left: 0,
+      right: 0,
       bgcolor: 'background.default',
       overflow: 'hidden',
-      width: '100%',
     }}>
-      <Paper
-        elevation={0}
-        sx={{
-          width: { xs: '100%', sm: 320 },
-          height: '100%',
-          borderRight: { sm: 1 },
-          borderColor: 'divider',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-          position: { xs: 'relative', sm: 'relative' },
-          transform: {
-            xs: selectedConversation ? 'translateX(-100%)' : 'translateX(0)',
-            sm: 'none'
-          },
-          transition: 'transform 0.3s ease-in-out',
-          bgcolor: 'background.default',
-        }}
-      >
-        <Box
+      <Box sx={{
+        width: '100%',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        height: '100%',
+        display: 'flex',
+        position: 'relative',
+        boxShadow: { sm: '0 0 20px rgba(0, 0, 0, 0.1)' },
+        borderRadius: { sm: '8px 8px 0 0' },
+        overflow: 'hidden',
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+      }}>
+        <Paper
+          elevation={0}
           sx={{
-            px: { xs: 3, sm: 2 },
-            py: 2,
-            borderBottom: 1,
-            borderColor: 'divider',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 600,
-              fontSize: '1.75rem',
-            }}
-          >
-            Messages
-          </Typography>
-        </Box>
-
-        {conversations.length === 0 ? (
-          <Box
-            sx={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: 3,
-              textAlign: 'center',
-              color: 'text.secondary',
-              bgcolor: 'background.default',
-            }}
-          >
-            <ChatBubbleIcon
-              sx={{
-                fontSize: 64,
-                mb: 2,
-                opacity: 0.6,
-                color: 'primary.main'
-              }}
-            />
-            <Typography
-              variant="h6"
-              gutterBottom
-              sx={{
-                fontWeight: 500,
-                color: 'text.primary'
-              }}
-            >
-              No Conversations
-            </Typography>
-            <Typography
-              variant="body1"
-              sx={{
-                color: 'text.secondary',
-                maxWidth: '80%',
-                mx: 'auto'
-              }}
-            >
-              When you message someone about a listing, it will appear here
-            </Typography>
-          </Box>
-        ) : (
-          <List
-            sx={{
-              flex: 1,
-              overflow: 'auto',
-              p: 0,
-              bgcolor: 'background.default'
-            }}
-          >
-            {conversations.map(renderConversationItem)}
-          </List>
-        )}
-      </Paper>
-
-      {selectedConversation && (
-        <Box
-          sx={{
-            width: '100%',
+            width: { xs: '100%', sm: 320 },
             height: '100%',
+            overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            position: 'absolute',
-            top: 0,
-            left: 0,
+            position: { xs: 'relative', sm: 'relative' },
             transform: {
-              xs: selectedConversation ? 'translateX(0)' : 'translateX(100%)',
+              xs: selectedConversation ? 'translateX(-100%)' : 'translateX(0)',
               sm: 'none'
             },
             transition: 'transform 0.3s ease-in-out',
             bgcolor: 'background.default',
-            marginLeft: { xs: 0, sm: '320px' },
-            width: { xs: '100%', sm: 'calc(100% - 320px)' }
+            borderRight: { sm: '1px solid rgba(0, 0, 0, 0.08)' },
+            boxShadow: { sm: '4px 0 8px -4px rgba(0, 0, 0, 0.05)' }
           }}
         >
-          <Paper
-            elevation={0}
+          <Box
             sx={{
-              p: 2,
+              px: { xs: 3, sm: 2 },
+              py: 2,
+              height: '72px',
+              display: 'flex',
+              alignItems: 'center',
               borderBottom: 1,
               borderColor: 'divider',
-              bgcolor: 'background.paper'
+              bgcolor: '#1a1f2c',
+              color: 'white',
+              position: 'sticky',
+              top: 0,
+              zIndex: 1
             }}
           >
-            <Stack direction="row" spacing={2} alignItems="center">
-              {isMobile && (
-                <IconButton edge="start" onClick={handleBackToConversations}>
-                  <ArrowBackIcon />
-                </IconButton>
-              )}
-              <Avatar
-                src={selectedConversation.listing?.images?.[0]}
-                alt={selectedConversation.listing?.title}
-                variant="rounded"
-                sx={{ width: 48, height: 48 }}
-              />
-              <Stack direction="column" sx={{ minWidth: 0, flex: 1 }}>
-                <Typography variant="h6" noWrap>
-                  {selectedConversation.listing?.title || 'Unknown Item'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" noWrap>
-                  {selectedConversation.user?.displayName || 'Unknown User'}
-                </Typography>
-              </Stack>
-            </Stack>
-          </Paper>
-
-          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-            {messages.map(renderMessage)}
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 600,
+                fontSize: '1.75rem',
+                lineHeight: 1.2
+              }}
+            >
+              Messages
+            </Typography>
           </Box>
 
-          <Paper
-            elevation={0}
+          {conversations.length === 0 ? (
+            <Box
+              sx={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 3,
+                textAlign: 'center',
+                color: 'text.secondary',
+                bgcolor: '#242836',
+                height: 'calc(100% - 72px)',
+                overflow: 'auto'
+              }}
+            >
+              <ChatBubbleIcon
+                sx={{
+                  fontSize: 64,
+                  mb: 2,
+                  opacity: 0.6,
+                  color: 'primary.main'
+                }}
+              />
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{
+                  fontWeight: 500,
+                  color: 'text.primary'
+                }}
+              >
+                No Conversations
+              </Typography>
+              <Typography
+                variant="body1"
+                sx={{
+                  color: 'text.secondary',
+                  maxWidth: '80%',
+                  mx: 'auto'
+                }}
+              >
+                When you message someone about a listing, it will appear here
+              </Typography>
+            </Box>
+          ) : (
+            <List
+              sx={{
+                flex: 1,
+                overflow: 'auto',
+                p: 0,
+                bgcolor: '#242836',
+                height: 'calc(100% - 72px)',
+                '& .MuiListItem-root': {
+                  bgcolor: '#242836',
+                  '&:hover': {
+                    bgcolor: '#2c3040',
+                  },
+                  '&.Mui-selected': {
+                    bgcolor: 'primary.main',
+                    '&:hover': {
+                      bgcolor: 'primary.dark',
+                    },
+                  },
+                }
+              }}
+            >
+              {conversations.map(renderConversationItem)}
+            </List>
+          )}
+        </Paper>
+
+        {selectedConversation ? (
+          <Box
             sx={{
-              p: 2,
-              borderTop: 1,
-              borderColor: 'divider',
-              bgcolor: 'background.paper'
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              transform: {
+                xs: selectedConversation ? 'translateX(0)' : 'translateX(100%)',
+                sm: 'none'
+              },
+              transition: 'transform 0.3s ease-in-out',
+              bgcolor: 'background.default',
+              marginLeft: { xs: 0, sm: '320px' },
+              width: { xs: '100%', sm: 'calc(100% - 320px)' }
             }}
           >
-            <Stack direction="row" spacing={1}>
-              <TextField
-                fullWidth
-                placeholder="Type a message..."
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                size="small"
-              />
-              <IconButton
-                color="primary"
-                onClick={() => setOfferDialogOpen(true)}
-                sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
-              >
-                <AttachMoneyIcon />
-              </IconButton>
-              <IconButton color="primary" onClick={handleSendMessage}>
-                <SendIcon />
-              </IconButton>
-            </Stack>
-            {isMobile && (
-              <Button
-                fullWidth
-                variant="outlined"
-                onClick={() => setOfferDialogOpen(true)}
-                startIcon={<AttachMoneyIcon />}
-                sx={{ mt: 1 }}
-              >
-                Make Offer
-              </Button>
-            )}
-          </Paper>
-        </Box>
-      )}
+            <Paper
+              elevation={0}
+              sx={{
+                px: { xs: 3, sm: 2 },
+                py: 2,
+                height: '72px',
+                display: 'flex',
+                alignItems: 'center',
+                borderBottom: 1,
+                borderColor: 'divider',
+                bgcolor: '#1a1f2c',
+                color: 'white',
+                borderRadius: 0
+              }}
+            >
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ width: '100%' }}>
+                {isMobile && (
+                  <IconButton edge="start" onClick={handleBackToConversations} sx={{ color: 'white' }}>
+                    <ArrowBackIcon />
+                  </IconButton>
+                )}
+                <Avatar
+                  src={selectedConversation.listing?.images?.[0]}
+                  alt={selectedConversation.listing?.title}
+                  variant="rounded"
+                  sx={{ width: 36, height: 36 }}
+                />
+                <Stack direction="column" sx={{ minWidth: 0, flex: 1, py: 0 }}>
+                  <Typography
+                    variant="h6"
+                    noWrap
+                    sx={{
+                      color: 'white',
+                      fontSize: '1.75rem',
+                      fontWeight: 600,
+                      lineHeight: 1.2
+                    }}
+                  >
+                    {selectedConversation.listing?.title || 'Unknown Item'}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: 'rgba(255, 255, 255, 0.7)',
+                      lineHeight: 1.2
+                    }}
+                    noWrap
+                  >
+                    {selectedConversation.user?.displayName || 'Unknown User'}
+                  </Typography>
+                </Stack>
+              </Stack>
+            </Paper>
 
-      <Dialog open={offerDialogOpen} onClose={() => setOfferDialogOpen(false)}>
-        <DialogTitle>Make an Offer</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Offer Amount ($)"
-            type="number"
-            fullWidth
-            value={offerAmount}
-            onChange={(e) => setOfferAmount(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOfferDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleSendOffer} variant="contained" color="primary">
-            Send Offer
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <Box
+              ref={messagesContainerRef}
+              sx={{
+                flex: 1,
+                overflow: 'auto',
+                p: 2,
+                scrollBehavior: 'smooth',
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: 'transparent',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: theme.palette.divider,
+                  borderRadius: '4px',
+                },
+                '&::-webkit-scrollbar-thumb:hover': {
+                  background: theme.palette.text.disabled,
+                }
+              }}
+            >
+              {renderMessages()}
+              <div ref={messagesEndRef} style={{ height: '1px' }} />
+            </Box>
+
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                borderTop: 1,
+                borderColor: 'divider',
+                bgcolor: 'background.paper'
+              }}
+            >
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  fullWidth
+                  placeholder="Type a message..."
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  size="small"
+                />
+                <IconButton
+                  color="primary"
+                  onClick={() => setOfferDialogOpen(true)}
+                  sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+                >
+                  <AttachMoneyIcon />
+                </IconButton>
+                <IconButton color="primary" onClick={handleSendMessage}>
+                  <SendIcon />
+                </IconButton>
+              </Stack>
+              {isMobile && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={() => setOfferDialogOpen(true)}
+                  startIcon={<AttachMoneyIcon />}
+                  sx={{ mt: 1 }}
+                >
+                  Make Offer
+                </Button>
+              )}
+            </Paper>
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: { xs: 'none', sm: 'flex' },
+              width: 'calc(100% - 320px)',
+              height: '100%',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'background.default',
+              borderLeft: '1px solid',
+              borderColor: 'divider',
+              opacity: 0.5,
+            }}
+          >
+            <Box
+              sx={{
+                textAlign: 'center',
+                maxWidth: '400px',
+                p: 3,
+              }}
+            >
+              <ChatBubbleIcon
+                sx={{
+                  fontSize: 80,
+                  color: 'primary.main',
+                  opacity: 0.2,
+                  mb: 2
+                }}
+              />
+              <Typography
+                variant="h5"
+                gutterBottom
+                sx={{
+                  fontWeight: 600,
+                  color: 'text.primary',
+                  mb: 1
+                }}
+              >
+                Select a Conversation
+              </Typography>
+              <Typography
+                variant="body1"
+                color="text.secondary"
+                sx={{
+                  mb: 3,
+                  lineHeight: 1.6
+                }}
+              >
+                Choose a conversation from the list to view messages and continue your discussion about listings.
+              </Typography>
+            </Box>
+          </Box>
+        )}
+
+        <Dialog
+          open={offerDialogOpen}
+          onClose={() => {
+            setOfferDialogOpen(false);
+            setOfferAmount('');
+            setAdditionalMessage('');
+          }}
+          PaperProps={{
+            sx: {
+              bgcolor: 'background.default',
+              borderRadius: 2,
+              width: '100%',
+              maxWidth: { xs: '100%', sm: 400 },
+              m: { xs: 0, sm: 2 }
+            }
+          }}
+        >
+          <DialogTitle
+            sx={{
+              fontSize: '1.5rem',
+              fontWeight: 600,
+              pb: 1
+            }}
+          >
+            Make an Offer
+          </DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Offer Amount ($)"
+              type="number"
+              fullWidth
+              value={offerAmount}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '' || (value.match(/^\d*\.?\d{0,2}$/) && !isNaN(parseFloat(value)))) {
+                  setOfferAmount(value);
+                }
+              }}
+              inputProps={{
+                min: 0,
+                step: "0.01",
+                pattern: "^\\d*\\.?\\d{0,2}$",
+                inputMode: "decimal"
+              }}
+              sx={{
+                mt: 2,
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'primary.light',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                },
+              }}
+            />
+            <TextField
+              margin="dense"
+              label="Additional Message (Optional)"
+              multiline
+              rows={4}
+              fullWidth
+              value={additionalMessage}
+              onChange={(e) => setAdditionalMessage(e.target.value)}
+              sx={{
+                mt: 3,
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'primary.light',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                },
+              }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            <Button
+              onClick={() => {
+                setOfferDialogOpen(false);
+                setOfferAmount('');
+                setAdditionalMessage('');
+              }}
+              sx={{
+                color: 'primary.main',
+                '&:hover': {
+                  backgroundColor: 'rgba(124, 58, 237, 0.04)'
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendOffer}
+              variant="contained"
+              disabled={!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0}
+              sx={{
+                bgcolor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  bgcolor: 'primary.dark',
+                },
+                '&.Mui-disabled': {
+                  bgcolor: 'rgba(124, 58, 237, 0.12)',
+                  color: 'rgba(255, 255, 255, 0.7)'
+                }
+              }}
+            >
+              Send Offer
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog
+          open={counterOfferDialogOpen}
+          onClose={() => {
+            setCounterOfferDialogOpen(false);
+            setOfferAmount('');
+            setAdditionalMessage('');
+            setSelectedOfferMessage(null);
+          }}
+          PaperProps={{
+            sx: {
+              bgcolor: 'background.default',
+              borderRadius: 2,
+              width: '100%',
+              maxWidth: { xs: '100%', sm: 400 },
+              m: { xs: 0, sm: 2 }
+            }
+          }}
+        >
+          <DialogTitle sx={{ fontSize: '1.5rem', fontWeight: 600 }}>
+            Make Counter Offer
+          </DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Original offer: ${selectedOfferMessage?.amount}
+            </Typography>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Counter Offer Amount ($)"
+              type="number"
+              fullWidth
+              value={offerAmount}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '' || (value.match(/^\d*\.?\d{0,2}$/) && !isNaN(parseFloat(value)))) {
+                  setOfferAmount(value);
+                }
+              }}
+              inputProps={{
+                min: 0,
+                step: "0.01",
+                pattern: "^\\d*\\.?\\d{0,2}$",
+                inputMode: "decimal",
+                onKeyDown: (e) => {
+                  if (
+                    !/[\d.]/.test(e.key) &&
+                    e.key !== 'Backspace' &&
+                    e.key !== 'ArrowLeft' &&
+                    e.key !== 'ArrowRight' &&
+                    e.key !== 'Tab' &&
+                    !e.metaKey &&
+                    !e.ctrlKey
+                  ) {
+                    e.preventDefault();
+                  }
+                  if (e.key === '.' && offerAmount.includes('.')) {
+                    e.preventDefault();
+                  }
+                }
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'primary.light',
+                  },
+                },
+              }}
+            />
+            <TextField
+              margin="dense"
+              label="Additional Message (Optional)"
+              multiline
+              rows={4}
+              fullWidth
+              value={additionalMessage}
+              onChange={(e) => setAdditionalMessage(e.target.value)}
+              sx={{
+                mt: 2,
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'primary.main',
+                  },
+                  '&:hover fieldset': {
+                    borderColor: 'primary.light',
+                  },
+                },
+              }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0 }}>
+            <Button
+              onClick={() => {
+                setCounterOfferDialogOpen(false);
+                setOfferAmount('');
+                setAdditionalMessage('');
+                setSelectedOfferMessage(null);
+              }}
+              sx={{
+                color: 'primary.main',
+                '&:hover': {
+                  backgroundColor: 'rgba(124, 58, 237, 0.04)'
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendOffer}
+              variant="contained"
+              disabled={!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0}
+              sx={{
+                bgcolor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  bgcolor: 'primary.dark',
+                },
+                '&.Mui-disabled': {
+                  bgcolor: 'rgba(124, 58, 237, 0.12)',
+                  color: 'rgba(255, 255, 255, 0.7)'
+                }
+              }}
+            >
+              Send Counter Offer
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </Box>
     </Box>
   );
 };

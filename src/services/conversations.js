@@ -39,20 +39,13 @@ export const getOrCreateConversation = async (otherUserId, listingId = null) => 
   if (!currentUserId) throw new Error('User not authenticated');
 
   try {
-    console.log('Creating/getting conversation between:', currentUserId, 'and', otherUserId);
-
     const conversationId = createConversationId(currentUserId, otherUserId);
     const conversationRef = doc(db, 'conversations', conversationId);
-
     const conversationDoc = await getDoc(conversationRef);
-    console.log('Existing conversation:', conversationDoc.exists());
 
     if (conversationDoc.exists()) {
-      const data = conversationDoc.data();
-      console.log('Existing conversation data:', data);
-      return { id: conversationId, ...data };
+      return { id: conversationId, ...conversationDoc.data() };
     } else {
-      // Create a new conversation
       const newConversation = {
         participants: [currentUserId, otherUserId],
         lastMessage: null,
@@ -62,12 +55,7 @@ export const getOrCreateConversation = async (otherUserId, listingId = null) => 
         updatedAt: serverTimestamp()
       };
 
-      console.log('Creating new conversation:', newConversation);
-
-      // Use setDoc instead of updateDoc for new documents
       await setDoc(conversationRef, newConversation);
-
-      console.log('New conversation created successfully');
       return { id: conversationId, ...newConversation };
     }
   } catch (error) {
@@ -141,22 +129,16 @@ export const getConversations = async () => {
   if (!currentUserId) throw new Error('User not authenticated');
 
   try {
-    console.log('Fetching conversations for user:', currentUserId);
-
-    // Query conversations where the current user is a participant
     const conversationsRef = collection(db, 'conversations');
     let q;
 
     try {
-      // Try with ordering first
       q = query(
         conversationsRef,
         where('participants', 'array-contains', currentUserId),
         orderBy('updatedAt', 'desc')
       );
     } catch (indexError) {
-      console.warn('Index not ready, falling back to basic query:', indexError);
-      // Fallback to basic query without ordering if index is not ready
       q = query(
         conversationsRef,
         where('participants', 'array-contains', currentUserId)
@@ -164,23 +146,16 @@ export const getConversations = async () => {
     }
 
     const querySnapshot = await getDocs(q);
-    console.log('Found conversations:', querySnapshot.size);
-
     const conversations = [];
 
     for (const conversationDoc of querySnapshot.docs) {
       const data = conversationDoc.data();
-      console.log('Raw conversation data:', data);
-
-      // Find the other participant's ID
       const otherUserId = data.participants.find(id => id !== currentUserId);
-      console.log('Other participant ID:', otherUserId);
 
       // Get the other user's details
       const userRef = doc(db, 'users', otherUserId);
       const userDoc = await getDoc(userRef);
       const userData = userDoc.exists() ? userDoc.data() : null;
-      console.log('Other user data:', userData);
 
       // Get listing details if available
       let listingData = null;
@@ -192,12 +167,8 @@ export const getConversations = async () => {
             id: listingDoc.id,
             ...listingDoc.data()
           };
-          console.log('Listing data:', listingData);
         }
       }
-
-      // Get the unread count for the current user
-      const unreadCount = data[`unreadCount_${currentUserId}`] || 0;
 
       conversations.push({
         id: conversationDoc.id,
@@ -206,13 +177,12 @@ export const getConversations = async () => {
         user: userData,
         listing: listingData,
         lastMessage: data.lastMessage,
-        unreadCount,
+        unreadCount: data[`unreadCount_${currentUserId}`] || 0,
         updatedAt: data.updatedAt,
         createdAt: data.createdAt
       });
     }
 
-    // If we had to use the fallback query, sort the results in memory
     if (!q._query.orderBy) {
       conversations.sort((a, b) => {
         const timeA = a.updatedAt?.toDate() || new Date(0);
@@ -329,12 +299,13 @@ export const markMessagesAsRead = async (conversationId) => {
 
 // Handle offer response (accept/reject)
 export const handleOfferResponse = async (conversationId, messageId, status) => {
-  const currentUserId = getCurrentUserId();
-  if (!currentUserId) throw new Error('User not authenticated');
-
   try {
-    // Get the message
-    const messageRef = doc(db, `conversations/${conversationId}/messages`, messageId);
+    const auth = getAuth();
+    if (!auth.currentUser) {
+      throw new Error('User must be authenticated');
+    }
+
+    const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
     const messageDoc = await getDoc(messageRef);
 
     if (!messageDoc.exists()) {
@@ -343,28 +314,52 @@ export const handleOfferResponse = async (conversationId, messageId, status) => 
 
     const messageData = messageDoc.data();
 
-    // Verify the user is the receiver of the offer
-    if (messageData.receiverId !== currentUserId) {
-      throw new Error('User not authorized to respond to this offer');
+    // For rescinding, only allow if user is the sender and offer is pending
+    if (status === 'rescinded') {
+      if (messageData.senderId !== auth.currentUser.uid) {
+        throw new Error('Only the sender can rescind their offer');
+      }
+      if (messageData.status !== 'pending') {
+        throw new Error('Only pending offers can be rescinded');
+      }
+    }
+    // For accepting/rejecting, only allow if user is the receiver and offer is pending
+    else if (status === 'accepted' || status === 'rejected') {
+      if (messageData.senderId === auth.currentUser.uid) {
+        throw new Error('Cannot accept/reject your own offer');
+      }
+      if (messageData.status !== 'pending') {
+        throw new Error('Only pending offers can be accepted or rejected');
+      }
     }
 
-    // Update the message status
     await updateDoc(messageRef, {
-      status
-    });
-
-    // Update the conversation's last message
-    const conversationRef = doc(db, 'conversations', conversationId);
-    await updateDoc(conversationRef, {
-      'lastMessage.status': status,
+      status: status,
       updatedAt: serverTimestamp()
     });
 
-    return {
-      id: messageId,
-      ...messageData,
-      status
-    };
+    // Update the conversation's last message if this was it
+    const conversationRef = doc(db, 'conversations', conversationId);
+    const conversationDoc = await getDoc(conversationRef);
+
+    if (conversationDoc.exists() && conversationDoc.data().lastMessage?.id === messageId) {
+      const updateData = {
+        'lastMessage.status': status,
+        updatedAt: serverTimestamp()
+      };
+
+      // If the offer is being rescinded, update the content to indicate it was rescinded
+      if (status === 'rescinded') {
+        // Update the lastMessage content to show it was rescinded
+        updateData['lastMessage.content'] = `Offer of $${messageData.offerAmount} was rescinded`;
+        // Keep the message hidden by not adding a new message
+        updateData['lastMessage.hidden'] = true;
+      }
+
+      await updateDoc(conversationRef, updateData);
+    }
+
+    return true;
   } catch (error) {
     console.error('Error handling offer response:', error);
     throw error;

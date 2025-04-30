@@ -1,4 +1,4 @@
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 export const initializeLikeCount = async () => {
@@ -6,14 +6,14 @@ export const initializeLikeCount = async () => {
     const listingsRef = collection(db, 'listings');
     const querySnapshot = await getDocs(listingsRef);
 
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      if (!data.likes) {
-        // Initialize likes count if it doesn't exist
-        doc.ref.update({ likes: 0 });
-      }
-    });
+    const updatePromises = querySnapshot.docs
+      .filter(doc => !doc.data().likes)
+      .map(doc => updateDoc(doc.ref, { likes: 0 }));
+
+    await Promise.all(updatePromises);
+    console.log('Successfully initialized like counts for all listings');
   } catch (error) {
     console.error('Error initializing like counts:', error);
+    throw error; // Propagate the error for better error handling
   }
 };
