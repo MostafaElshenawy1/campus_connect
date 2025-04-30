@@ -18,14 +18,18 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Stack
+  Stack,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
-import { Send as SendIcon, AttachMoney as AttachMoneyIcon } from '@mui/icons-material';
+import { Send as SendIcon, AttachMoney as AttachMoneyIcon, ArrowBack as ArrowBackIcon, ChatBubbleOutline as ChatBubbleIcon } from '@mui/icons-material';
 import { getConversations, getMessages, sendMessage, handleOfferResponse } from '../../services/conversations';
 import { formatDistanceToNow } from 'date-fns';
 import { getAuth } from 'firebase/auth';
 
 const Messages = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -34,6 +38,7 @@ const Messages = () => {
   const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [selectedMessage, setSelectedMessage] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     console.log('Messages component mounted');
@@ -68,12 +73,12 @@ const Messages = () => {
       const auth = getAuth();
       if (!auth.currentUser) {
         console.log('No authenticated user');
+        setConversations([]);
+        setLoading(false);
         return;
       }
-      console.log('Authenticated user:', auth.currentUser.uid);
 
       const conversationsData = await getConversations();
-      console.log('Raw conversations data:', conversationsData);
 
       if (!conversationsData || conversationsData.length === 0) {
         console.log('No conversations found');
@@ -86,14 +91,14 @@ const Messages = () => {
       const sortedConversations = conversationsData.sort((a, b) => {
         const timeA = a.lastMessage?.timestamp?.toDate() || new Date(0);
         const timeB = b.lastMessage?.timestamp?.toDate() || new Date(0);
-        return timeB - timeA;
+        return timeB - timeA; // Most recent first
       });
 
-      console.log('Sorted conversations:', sortedConversations);
       setConversations(sortedConversations);
       setLoading(false);
     } catch (error) {
       console.error('Error loading conversations:', error);
+      setError(`Error loading conversations: ${error.message}`);
       setLoading(false);
     }
   };
@@ -240,10 +245,14 @@ const Messages = () => {
         key={conversation.id}
         button
         selected={selectedConversation?.id === conversation.id}
-        onClick={() => setSelectedConversation(conversation)}
+        onClick={() => {
+          setSelectedConversation(conversation);
+        }}
         sx={{
-          mb: 1,
-          borderRadius: 1,
+          py: 2,
+          px: { xs: 3, sm: 2 },
+          borderBottom: '1px solid',
+          borderColor: 'divider',
           '&:hover': {
             backgroundColor: 'rgba(0, 0, 0, 0.04)',
           },
@@ -255,128 +264,290 @@ const Messages = () => {
           },
         }}
       >
-        <ListItemAvatar>
+        <ListItemAvatar sx={{ minWidth: 65 }}>
           <Badge
             badgeContent={conversation.unreadCount}
             color="primary"
             invisible={!conversation.unreadCount}
+            sx={{
+              '& .MuiBadge-badge': {
+                backgroundColor: '#007AFF',
+                color: 'white',
+                minWidth: 20,
+                height: 20,
+                fontSize: '0.75rem',
+              },
+            }}
           >
             <Avatar
               src={listingImage}
               alt={listingTitle}
               variant="rounded"
-              sx={{ width: 56, height: 56 }}
+              sx={{
+                width: 50,
+                height: 50,
+                borderRadius: 2,
+              }}
             />
           </Badge>
         </ListItemAvatar>
         <ListItemText
           primary={
-            <Stack direction="column" spacing={0.5}>
-              <Typography variant="subtitle1" component="div" noWrap>
+            <Box sx={{ mb: 0.5 }}>
+              <Typography
+                variant="subtitle1"
+                component="div"
+                noWrap
+                sx={{
+                  fontWeight: conversation.unreadCount ? 600 : 400,
+                  color: conversation.unreadCount ? 'text.primary' : 'text.secondary',
+                }}
+              >
                 {listingTitle}
               </Typography>
-              <Typography variant="body2" color="text.secondary" noWrap>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  fontSize: '0.8125rem',
+                  fontWeight: conversation.unreadCount ? 500 : 400,
+                }}
+              >
                 {sellerName}
               </Typography>
-            </Stack>
+            </Box>
           }
           secondary={
             lastMessage ? (
-              <>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
                 <Typography
                   variant="body2"
-                  color="text.secondary"
-                  noWrap
                   sx={{
-                    maxWidth: '200px',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 1,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden'
+                    color: conversation.unreadCount ? 'text.primary' : 'text.secondary',
+                    fontWeight: conversation.unreadCount ? 500 : 400,
+                    fontSize: '0.875rem',
+                    flex: 1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
                 >
                   {lastMessage.content}
                 </Typography>
                 {timestamp && (
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: 'text.secondary',
+                      fontSize: '0.75rem',
+                      whiteSpace: 'nowrap',
+                      ml: 'auto',
+                      pl: 2,
+                    }}
+                  >
                     {formatDistanceToNow(timestamp, { addSuffix: true })}
                   </Typography>
                 )}
-              </>
+              </Box>
             ) : 'No messages yet'
           }
-          sx={{ ml: 2 }}
         />
       </ListItem>
     );
   };
 
-  if (loading && !selectedConversation) {
+  const handleBackToConversations = () => {
+    setSelectedConversation(null);
+  };
+
+  if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        bgcolor: 'background.default'
+      }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
-      {/* Conversations List */}
+    <Box sx={{
+      display: 'flex',
+      height: { xs: 'calc(100vh - 56px)', sm: 'calc(100vh - 64px)' },
+      position: 'relative',
+      bgcolor: 'background.default',
+      overflow: 'hidden',
+      width: '100%',
+    }}>
       <Paper
+        elevation={0}
         sx={{
-          width: 320,
-          borderRight: 1,
+          width: { xs: '100%', sm: 320 },
+          height: '100%',
+          borderRight: { sm: 1 },
           borderColor: 'divider',
           overflow: 'hidden',
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          position: { xs: 'relative', sm: 'relative' },
+          transform: {
+            xs: selectedConversation ? 'translateX(-100%)' : 'translateX(0)',
+            sm: 'none'
+          },
+          transition: 'transform 0.3s ease-in-out',
+          bgcolor: 'background.default',
         }}
       >
-        <Typography variant="h6" sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-          Messages
-        </Typography>
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-            <CircularProgress />
+        <Box
+          sx={{
+            px: { xs: 3, sm: 2 },
+            py: 2,
+            borderBottom: 1,
+            borderColor: 'divider',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 600,
+              fontSize: '1.75rem',
+            }}
+          >
+            Messages
+          </Typography>
+        </Box>
+
+        {conversations.length === 0 ? (
+          <Box
+            sx={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 3,
+              textAlign: 'center',
+              color: 'text.secondary',
+              bgcolor: 'background.default',
+            }}
+          >
+            <ChatBubbleIcon
+              sx={{
+                fontSize: 64,
+                mb: 2,
+                opacity: 0.6,
+                color: 'primary.main'
+              }}
+            />
+            <Typography
+              variant="h6"
+              gutterBottom
+              sx={{
+                fontWeight: 500,
+                color: 'text.primary'
+              }}
+            >
+              No Conversations
+            </Typography>
+            <Typography
+              variant="body1"
+              sx={{
+                color: 'text.secondary',
+                maxWidth: '80%',
+                mx: 'auto'
+              }}
+            >
+              When you message someone about a listing, it will appear here
+            </Typography>
           </Box>
         ) : (
-          <List sx={{ flex: 1, overflow: 'auto', px: 2 }}>
+          <List
+            sx={{
+              flex: 1,
+              overflow: 'auto',
+              p: 0,
+              bgcolor: 'background.default'
+            }}
+          >
             {conversations.map(renderConversationItem)}
           </List>
         )}
       </Paper>
 
-      {/* Messages Area */}
-      {selectedConversation ? (
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {/* Conversation Header */}
-          <Paper sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+      {selectedConversation && (
+        <Box
+          sx={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            transform: {
+              xs: selectedConversation ? 'translateX(0)' : 'translateX(100%)',
+              sm: 'none'
+            },
+            transition: 'transform 0.3s ease-in-out',
+            bgcolor: 'background.default',
+            marginLeft: { xs: 0, sm: '320px' },
+            width: { xs: '100%', sm: 'calc(100% - 320px)' }
+          }}
+        >
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderBottom: 1,
+              borderColor: 'divider',
+              bgcolor: 'background.paper'
+            }}
+          >
             <Stack direction="row" spacing={2} alignItems="center">
+              {isMobile && (
+                <IconButton edge="start" onClick={handleBackToConversations}>
+                  <ArrowBackIcon />
+                </IconButton>
+              )}
               <Avatar
                 src={selectedConversation.listing?.images?.[0]}
                 alt={selectedConversation.listing?.title}
                 variant="rounded"
                 sx={{ width: 48, height: 48 }}
               />
-              <Stack direction="column">
-                <Typography variant="h6">
+              <Stack direction="column" sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="h6" noWrap>
                   {selectedConversation.listing?.title || 'Unknown Item'}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" noWrap>
                   {selectedConversation.user?.displayName || 'Unknown User'}
                 </Typography>
               </Stack>
             </Stack>
           </Paper>
 
-          {/* Messages List */}
           <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
             {messages.map(renderMessage)}
           </Box>
 
-          {/* Message Input */}
-          <Paper sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-            <Stack direction="row" spacing={2}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderTop: 1,
+              borderColor: 'divider',
+              bgcolor: 'background.paper'
+            }}
+          >
+            <Stack direction="row" spacing={1}>
               <TextField
                 fullWidth
                 placeholder="Type a message..."
@@ -385,36 +556,32 @@ const Messages = () => {
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 size="small"
               />
-              <Button
-                variant="contained"
+              <IconButton
+                color="primary"
                 onClick={() => setOfferDialogOpen(true)}
-                startIcon={<AttachMoneyIcon />}
+                sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
               >
-                Make Offer
-              </Button>
+                <AttachMoneyIcon />
+              </IconButton>
               <IconButton color="primary" onClick={handleSendMessage}>
                 <SendIcon />
               </IconButton>
             </Stack>
+            {isMobile && (
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={() => setOfferDialogOpen(true)}
+                startIcon={<AttachMoneyIcon />}
+                sx={{ mt: 1 }}
+              >
+                Make Offer
+              </Button>
+            )}
           </Paper>
-        </Box>
-      ) : (
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            bgcolor: 'grey.100'
-          }}
-        >
-          <Typography variant="h6" color="text.secondary">
-            Select a conversation to start messaging
-          </Typography>
         </Box>
       )}
 
-      {/* Offer Dialog */}
       <Dialog open={offerDialogOpen} onClose={() => setOfferDialogOpen(false)}>
         <DialogTitle>Make an Offer</DialogTitle>
         <DialogContent>

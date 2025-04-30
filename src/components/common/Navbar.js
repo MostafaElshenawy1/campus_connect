@@ -154,7 +154,7 @@ function Navbar({ user }) {
               cursor: 'pointer',
             }}
           >
-            SM
+            Campus Connect
           </Typography>
 
           {/* Desktop Menu */}
