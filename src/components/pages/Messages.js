@@ -37,6 +37,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { useLocation } from 'react-router-dom';
 
 const Messages = () => {
   const theme = useTheme();
@@ -51,13 +52,15 @@ const Messages = () => {
   const [loading, setLoading] = useState(true);
   const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
-  const [additionalMessage, setAdditionalMessage] = useState('');
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [error, setError] = useState(null);
   const [counterOfferDialogOpen, setCounterOfferDialogOpen] = useState(false);
   const [selectedOfferMessage, setSelectedOfferMessage] = useState(null);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
+  const location = useLocation();
+  const [counterOfferAmount, setCounterOfferAmount] = useState('');
+  const [counterOfferMessage, setCounterOfferMessage] = useState('');
 
   useEffect(() => {
     const auth = getAuth();
@@ -250,34 +253,66 @@ const Messages = () => {
     }
   };
 
+  const handleKeyPress = (e) => {
+    const { name } = e.target;
+    if (name === 'offerAmount') {
+      // Only allow numbers and control keys (backspace, delete, etc)
+      const char = String.fromCharCode(e.which);
+      if (!/[\d]/.test(char) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+      }
+    }
+  };
+
+  const handleOfferChange = (e) => {
+    const { value } = e.target;
+
+    // Remove any non-digit characters
+    const numericValue = value.replace(/\D/g, '');
+    if (numericValue === '') {
+      setOfferAmount('');
+      return;
+    }
+
+    // Convert to number and check if negative or exceeds max
+    const numValue = Number(numericValue);
+    if (numValue < 0) {
+      return;
+    }
+
+    // If number exceeds max, set to max value
+    const finalValue = numValue > 99999 ? 99999 : numValue;
+
+    // Format with commas
+    const formattedValue = finalValue.toLocaleString();
+
+    setOfferAmount(formattedValue);
+  };
+
   const handleSendOffer = async () => {
-    if (!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0) return;
+    if (!offerAmount) {
+      setError('Please enter a valid offer amount');
+      return;
+    }
 
     try {
-      const messageContent = additionalMessage
-        ? `Offer: $${parseFloat(offerAmount).toFixed(2)}\n${additionalMessage}`
-        : `Offer: $${parseFloat(offerAmount).toFixed(2)}`;
+      // Remove commas and convert to number for storage
+      const numericAmount = Number(offerAmount.replace(/,/g, ''));
 
-      // Clear the input fields immediately for better UX
-      const amount = offerAmount;
-      const message = additionalMessage;
-      setOfferAmount('');
-      setAdditionalMessage('');
-      setOfferDialogOpen(false);
-
+      // Send the offer
       await sendMessage(
         selectedConversation.userId,
-        messageContent,
+        `Offer: $${offerAmount}`,
         true,
-        parseFloat(amount),
+        numericAmount,
         selectedConversation.listing?.id
       );
 
-      // Scroll to bottom after sending offer
-      scrollToBottom();
+      setOfferDialogOpen(false);
+      setOfferAmount('');
     } catch (error) {
       console.error('Error sending offer:', error);
-      setError('Failed to send offer');
+      setError('Failed to send offer. Please try again.');
     }
   };
 
@@ -339,6 +374,19 @@ const Messages = () => {
       setIsSwitchingConversation(false);
     }, 100);
   };
+
+  // Add this new useEffect to handle URL parameters
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const conversationId = params.get('conversation');
+
+    if (conversationId && conversations.length > 0) {
+      const conversation = conversations.find(c => c.id === conversationId);
+      if (conversation) {
+        handleSelectConversation(conversation);
+      }
+    }
+  }, [conversations, location.search]);
 
   const renderMessage = (message) => {
     const isCurrentUser = message.senderId === getAuth().currentUser.uid;
@@ -664,6 +712,70 @@ const Messages = () => {
     }
 
     return messages.map(renderMessage);
+  };
+
+  const handleCounterOfferChange = (e) => {
+    const { value } = e.target;
+
+    // Remove any non-digit characters
+    const numericValue = value.replace(/\D/g, '');
+    if (numericValue === '') {
+      setCounterOfferAmount('');
+      return;
+    }
+
+    // Convert to number and check if negative or exceeds max
+    const numValue = Number(numericValue);
+    if (numValue < 0) {
+      return;
+    }
+
+    // If number exceeds max, set to max value
+    const finalValue = numValue > 99999 ? 99999 : numValue;
+
+    // Format with commas
+    const formattedValue = finalValue.toLocaleString();
+
+    setCounterOfferAmount(formattedValue);
+  };
+
+  const handleSendCounterOffer = async () => {
+    if (!counterOfferAmount) {
+      setError('Please enter a valid offer amount');
+      return;
+    }
+
+    try {
+      // Remove commas and convert to number for storage
+      const numericAmount = Number(counterOfferAmount.replace(/,/g, ''));
+
+      // Send the counter offer
+      await sendMessage(
+        selectedConversation.userId,
+        `Counter Offer: $${counterOfferAmount}`,
+        true,
+        numericAmount,
+        selectedConversation.listing?.id
+      );
+
+      // If there's a message, send it as a separate message
+      if (counterOfferMessage.trim()) {
+        await sendMessage(
+          selectedConversation.userId,
+          counterOfferMessage.trim(),
+          false,
+          null,
+          selectedConversation.listing?.id
+        );
+      }
+
+      setCounterOfferDialogOpen(false);
+      setCounterOfferAmount('');
+      setCounterOfferMessage('');
+    } catch (error) {
+      console.error('Error sending counter offer:', error);
+      setError('Failed to send counter offer. Please try again.');
+    }
   };
 
   if (loading && !initialLoadComplete) {
@@ -1025,7 +1137,6 @@ const Messages = () => {
           onClose={() => {
             setOfferDialogOpen(false);
             setOfferAmount('');
-            setAdditionalMessage('');
           }}
           PaperProps={{
             sx: {
@@ -1051,46 +1162,14 @@ const Messages = () => {
               autoFocus
               margin="dense"
               label="Offer Amount ($)"
-              type="number"
+              name="offerAmount"
+              type="text"
               fullWidth
               value={offerAmount}
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === '' || (value.match(/^\d*\.?\d{0,2}$/) && !isNaN(parseFloat(value)))) {
-                  setOfferAmount(value);
-                }
-              }}
-              inputProps={{
-                min: 0,
-                step: "0.01",
-                pattern: "^\\d*\\.?\\d{0,2}$",
-                inputMode: "decimal"
-              }}
+              onChange={handleOfferChange}
+              onKeyPress={handleKeyPress}
               sx={{
                 mt: 2,
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: 'primary.main',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'primary.light',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: 'primary.main',
-                  },
-                },
-              }}
-            />
-            <TextField
-              margin="dense"
-              label="Additional Message (Optional)"
-              multiline
-              rows={4}
-              fullWidth
-              value={additionalMessage}
-              onChange={(e) => setAdditionalMessage(e.target.value)}
-              sx={{
-                mt: 3,
                 '& .MuiOutlinedInput-root': {
                   '& fieldset': {
                     borderColor: 'primary.main',
@@ -1110,7 +1189,6 @@ const Messages = () => {
               onClick={() => {
                 setOfferDialogOpen(false);
                 setOfferAmount('');
-                setAdditionalMessage('');
               }}
               sx={{
                 color: 'primary.main',
@@ -1124,7 +1202,7 @@ const Messages = () => {
             <Button
               onClick={handleSendOffer}
               variant="contained"
-              disabled={!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0}
+              disabled={!offerAmount}
               sx={{
                 bgcolor: 'primary.main',
                 color: 'white',
@@ -1146,9 +1224,8 @@ const Messages = () => {
           open={counterOfferDialogOpen}
           onClose={() => {
             setCounterOfferDialogOpen(false);
-            setOfferAmount('');
-            setAdditionalMessage('');
-            setSelectedOfferMessage(null);
+            setCounterOfferAmount('');
+            setCounterOfferMessage('');
           }}
           PaperProps={{
             sx: {
@@ -1171,76 +1248,32 @@ const Messages = () => {
               autoFocus
               margin="dense"
               label="Counter Offer Amount ($)"
-              type="number"
+              name="counterOfferAmount"
+              type="text"
               fullWidth
-              value={offerAmount}
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === '' || (value.match(/^\d*\.?\d{0,2}$/) && !isNaN(parseFloat(value)))) {
-                  setOfferAmount(value);
-                }
-              }}
-              inputProps={{
-                min: 0,
-                step: "0.01",
-                pattern: "^\\d*\\.?\\d{0,2}$",
-                inputMode: "decimal",
-                onKeyDown: (e) => {
-                  if (
-                    !/[\d.]/.test(e.key) &&
-                    e.key !== 'Backspace' &&
-                    e.key !== 'ArrowLeft' &&
-                    e.key !== 'ArrowRight' &&
-                    e.key !== 'Tab' &&
-                    !e.metaKey &&
-                    !e.ctrlKey
-                  ) {
-                    e.preventDefault();
-                  }
-                  if (e.key === '.' && offerAmount.includes('.')) {
-                    e.preventDefault();
-                  }
-                }
-              }}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: 'primary.main',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'primary.light',
-                  },
-                },
-              }}
+              value={counterOfferAmount}
+              onChange={handleCounterOfferChange}
+              onKeyPress={handleKeyPress}
+              sx={{ mb: 2 }}
             />
             <TextField
               margin="dense"
               label="Additional Message (Optional)"
-              multiline
-              rows={4}
+              type="text"
               fullWidth
-              value={additionalMessage}
-              onChange={(e) => setAdditionalMessage(e.target.value)}
-              sx={{
-                mt: 2,
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: 'primary.main',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: 'primary.light',
-                  },
-                },
-              }}
+              multiline
+              rows={3}
+              value={counterOfferMessage}
+              onChange={(e) => setCounterOfferMessage(e.target.value)}
+              placeholder="Add any additional details or questions about your counter offer..."
             />
           </DialogContent>
           <DialogActions sx={{ p: 2, pt: 0 }}>
             <Button
               onClick={() => {
                 setCounterOfferDialogOpen(false);
-                setOfferAmount('');
-                setAdditionalMessage('');
-                setSelectedOfferMessage(null);
+                setCounterOfferAmount('');
+                setCounterOfferMessage('');
               }}
               sx={{
                 color: 'primary.main',
@@ -1252,9 +1285,9 @@ const Messages = () => {
               Cancel
             </Button>
             <Button
-              onClick={handleSendOffer}
+              onClick={handleSendCounterOffer}
               variant="contained"
-              disabled={!offerAmount || isNaN(parseFloat(offerAmount)) || parseFloat(offerAmount) <= 0}
+              disabled={!counterOfferAmount}
               sx={{
                 bgcolor: 'primary.main',
                 color: 'white',

@@ -18,8 +18,11 @@ import { db } from '../config/firebase';
 import { getAuth } from 'firebase/auth';
 
 // Helper function to create a conversation ID that's consistent between two users
-const createConversationId = (userId1, userId2) => {
-  return [userId1, userId2].sort().join('_');
+const createConversationId = (userId1, userId2, listingId = null) => {
+  const sortedIds = [userId1, userId2].sort();
+  return listingId
+    ? `${sortedIds[0]}_${sortedIds[1]}_${listingId}`
+    : `${sortedIds[0]}_${sortedIds[1]}`;
 };
 
 // Send a message to another user
@@ -42,7 +45,7 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
 
   try {
     // Create conversation document first
-    const conversationId = createConversationId(senderId, receiverId);
+    const conversationId = createConversationId(senderId, receiverId, listingId);
     console.log('Generated Conversation ID:', conversationId);
 
     const conversationRef = doc(db, 'conversations', conversationId);
@@ -124,11 +127,7 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
       ...messageData
     };
   } catch (error) {
-    console.error('Error details:', {
-      code: error.code,
-      message: error.message,
-      details: error.details
-    });
+    console.error('Error sending message:', error);
     throw error;
   }
 };

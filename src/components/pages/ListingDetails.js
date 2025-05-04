@@ -13,70 +13,24 @@ import {
   DialogActions,
   TextField,
   CircularProgress,
-  Alert,
   Stack,
   Chip,
-  Card,
-  CardContent,
-  CardMedia,
-  CardActions,
-  Menu,
-  ListItemIcon,
-  ListItemText,
   Avatar,
-  styled,
 } from '@mui/material';
 import {
   Favorite as FavoriteIcon,
   FavoriteBorder as FavoriteBorderIcon,
   Share as ShareIcon,
-  Message as MessageIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
   LocationOn as LocationIcon,
 } from '@mui/icons-material';
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc, writeBatch, increment, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { useNavigate, useParams } from 'react-router-dom';
 import { handleLike, getLikeCount, formatLikeCount, checkIfLiked } from '../../services/likes';
 import ListingImageSlider from '../common/ListingImageSlider';
 import { sendMessage } from '../../services/messages';
-
-// Styled components for image transitions
-const ImageContainer = styled(Box)({
-  position: 'relative',
-  overflow: 'hidden',
-  height: '400px',
-  width: '100%',
-  borderRadius: '8px',
-});
-
-const ImageSlider = styled(Box)({
-  display: 'flex',
-  height: '100%',
-  transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
-  willChange: 'transform',
-});
-
-const StyledImage = styled('img')({
-  minWidth: '100%',
-  height: '100%',
-  objectFit: 'cover',
-  flexShrink: 0,
-});
-
-const NavigationButton = styled(IconButton)(({ theme }) => ({
-  position: 'absolute',
-  top: '50%',
-  transform: 'translateY(-50%)',
-  backgroundColor: 'rgba(255, 255, 255, 0.8)',
-  '&:hover': {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  zIndex: 2,
-}));
 
 function ListingDetails() {
   const { id } = useParams();
@@ -89,8 +43,6 @@ function ListingDetails() {
   const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [offerAmount, setOfferAmount] = useState('');
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [seller, setSeller] = useState(null);
   const [likeCount, setLikeCount] = useState(0);
@@ -237,7 +189,7 @@ function ListingDetails() {
       console.log('Message sent successfully:', result);
       setMessageDialogOpen(false);
       setMessage('');
-      navigate('/messages');
+      navigate(`/messages?conversation=${result.conversationId}`);
     } catch (error) {
       console.error('Error sending message:', {
         code: error.code,
@@ -248,13 +200,49 @@ function ListingDetails() {
     }
   };
 
+  const handleKeyPress = (e) => {
+    const { name } = e.target;
+    if (name === 'offerAmount') {
+      // Only allow numbers and control keys (backspace, delete, etc)
+      const char = String.fromCharCode(e.which);
+      if (!/[\d]/.test(char) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+      }
+    }
+  };
+
+  const handleOfferChange = (e) => {
+    const { value } = e.target;
+
+    // Remove any non-digit characters
+    const numericValue = value.replace(/\D/g, '');
+    if (numericValue === '') {
+      setOfferAmount('');
+      return;
+    }
+
+    // Convert to number and check if negative or exceeds max
+    const numValue = Number(numericValue);
+    if (numValue < 0) {
+      return;
+    }
+
+    // If number exceeds max, set to max value
+    const finalValue = numValue > 99999 ? 99999 : numValue;
+
+    // Format with commas
+    const formattedValue = finalValue.toLocaleString();
+
+    setOfferAmount(formattedValue);
+  };
+
   const handleSendOffer = async () => {
     if (!auth.currentUser) {
       navigate('/signin');
       return;
     }
 
-    if (!offerAmount || isNaN(offerAmount) || parseFloat(offerAmount) <= 0) {
+    if (!offerAmount) {
       setError('Please enter a valid offer amount');
       return;
     }
@@ -266,39 +254,41 @@ function ListingDetails() {
       console.log('Offer amount:', offerAmount);
       console.log('Listing ID:', listing.id);
 
-      const result = await sendMessage(
+      // Remove commas and convert to number for storage
+      const numericAmount = Number(offerAmount.replace(/,/g, ''));
+
+      // First send the offer
+      const offerResult = await sendMessage(
         listing.userId, // receiverId
         `Offer: $${offerAmount}`, // content
         true, // isOffer
-        parseFloat(offerAmount), // offerAmount
+        numericAmount, // offerAmount
         listing.id // listingId
       );
 
-      console.log('Offer sent successfully:', result);
+      console.log('Offer sent successfully:', offerResult);
+
+      // If there's a message, send it as a separate message
+      if (message.trim()) {
+        await sendMessage(
+          listing.userId,
+          message.trim(),
+          false, // not an offer
+          null,
+          listing.id
+        );
+      }
+
       setOfferDialogOpen(false);
       setOfferAmount('');
       setMessage('');
 
-      // Navigate to messages after sending
-      navigate('/messages');
+      // Navigate to messages with the conversation ID
+      navigate(`/messages?conversation=${offerResult.conversationId}`);
     } catch (error) {
       console.error('Error sending offer:', error);
       setError('Failed to send offer. Please try again.');
     }
-  };
-
-  const handlePreviousImage = (e) => {
-    e.stopPropagation();
-    setCurrentImageIndex((prev) =>
-      prev === 0 ? listing.images.length - 1 : prev - 1
-    );
-  };
-
-  const handleNextImage = (e) => {
-    e.stopPropagation();
-    setCurrentImageIndex((prev) =>
-      prev === listing.images.length - 1 ? 0 : prev + 1
-    );
   };
 
   if (loading) {
@@ -483,10 +473,12 @@ function ListingDetails() {
             autoFocus
             margin="dense"
             label="Offer Amount ($)"
-            type="number"
+            name="offerAmount"
+            type="text"
             fullWidth
             value={offerAmount}
-            onChange={(e) => setOfferAmount(e.target.value)}
+            onChange={handleOfferChange}
+            onKeyPress={handleKeyPress}
             sx={{ mb: 2 }}
           />
           <TextField
@@ -498,6 +490,7 @@ function ListingDetails() {
             rows={3}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
+            placeholder="Add any additional details or questions about your offer..."
           />
         </DialogContent>
         <DialogActions>

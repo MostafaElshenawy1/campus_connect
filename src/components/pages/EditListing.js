@@ -15,6 +15,7 @@ import {
   Alert,
   IconButton,
   Stack,
+  Snackbar,
 } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -22,6 +23,15 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { db, storage } from '../../config/firebase';
 import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
 import { auth } from '../../config/firebase';
+import { keyframes } from '@mui/system';
+
+// Add shake animation
+const shake = keyframes`
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+  100% { transform: translateX(0); }
+`;
 
 const categories = [
   'Books',
@@ -52,6 +62,8 @@ function EditListing() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [imageError, setImageError] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [listing, setListing] = useState({
     title: '',
     description: '',
@@ -85,6 +97,7 @@ function EditListing() {
           location: isPredefinedLocation ? data.location : 'Other',
           customLocation: isPredefinedLocation ? '' : data.location,
           images: data.images || data.imageUrls || [],
+          price: data.price.toLocaleString(),
         });
       } else {
         setError('Listing not found');
@@ -97,8 +110,51 @@ function EditListing() {
     }
   };
 
+  const handleKeyPress = (e) => {
+    const { name } = e.target;
+    if (name === 'price') {
+      // Only allow numbers and control keys (backspace, delete, etc)
+      const char = String.fromCharCode(e.which);
+      if (!/[\d]/.test(char) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+      }
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
+
+    // Special handling for price to ensure it's non-negative and only contains numbers
+    if (name === 'price') {
+      // Remove any non-digit characters
+      const numericValue = value.replace(/\D/g, '');
+      if (numericValue === '') {
+        setListing(prev => ({
+          ...prev,
+          [name]: '',
+        }));
+        return;
+      }
+
+      // Convert to number and check if negative or exceeds max
+      const numValue = Number(numericValue);
+      if (numValue < 0) {
+        return;
+      }
+
+      // If number exceeds max, set to max value
+      const finalValue = numValue > 99999 ? 99999 : numValue;
+
+      // Format with commas
+      const formattedValue = finalValue.toLocaleString();
+
+      setListing(prev => ({
+        ...prev,
+        [name]: formattedValue,
+      }));
+      return;
+    }
+
     setListing(prev => ({
       ...prev,
       [name]: value,
@@ -119,6 +175,7 @@ function EditListing() {
     if (validFiles.length > 0) {
       setError(null);
       setNewImages(prev => [...prev, ...validFiles]);
+      setImageError(false);
     }
   };
 
@@ -133,6 +190,11 @@ function EditListing() {
         images: prev.images.filter((_, i) => i !== index),
       }));
     }
+    setImageError(false);
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbarOpen(false);
   };
 
   const uploadImages = async (images) => {
@@ -173,13 +235,58 @@ function EditListing() {
     setError(null);
 
     try {
+      // Check if there are any images (either existing or new)
+      if (listing.images.length === 0 && newImages.length === 0) {
+        setImageError(true);
+        setSnackbarOpen(true);
+        // Reset image error state after animation completes
+        setTimeout(() => {
+          setImageError(false);
+        }, 500);
+        setLoading(false);
+        return;
+      }
+
+      // Upload new images if any
+      let newImageUrls = [];
+      if (newImages.length > 0) {
+        try {
+          newImageUrls = await uploadImages(newImages);
+        } catch (error) {
+          console.error('Error uploading new images:', error);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Delete removed images if any
+      if (imagesToDelete.length > 0) {
+        try {
+          await deleteImages(imagesToDelete);
+        } catch (error) {
+          console.error('Error deleting images:', error);
+          // Continue with the update even if deletion fails
+        }
+      }
+
+      // Get the current listing data
       const docRef = doc(db, 'listings', id);
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        throw new Error('Listing not found');
+      }
+
+      // Prepare the updated data
+      const updatedImages = [...listing.images, ...newImageUrls];
       const listingData = {
         ...listing,
         location: listing.location === 'Other' ? listing.customLocation : listing.location,
         updatedAt: serverTimestamp(),
+        price: Number(listing.price.replace(/,/g, '')),
+        images: updatedImages,
       };
 
+      // Update the listing
       await updateDoc(docRef, listingData);
       navigate('/my-listings');
     } catch (error) {
@@ -206,11 +313,6 @@ function EditListing() {
         <Typography variant="h4" sx={{ fontWeight: 700, mb: 4 }}>
           Edit Listing
         </Typography>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
         <Paper sx={{ p: 4, borderRadius: 3 }}>
           <form onSubmit={handleSubmit}>
             <Grid container spacing={3}>
@@ -241,9 +343,10 @@ function EditListing() {
                   fullWidth
                   label="Price"
                   name="price"
-                  type="number"
+                  type="text"
                   value={listing.price}
                   onChange={handleChange}
+                  onKeyPress={handleKeyPress}
                   InputProps={{
                     startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
                   }}
@@ -317,7 +420,15 @@ function EditListing() {
                 <Typography variant="h6" gutterBottom>
                   Images
                 </Typography>
-                <Stack direction="row" spacing={2} sx={{ mb: 2, flexWrap: 'wrap' }}>
+                <Stack
+                  direction="row"
+                  spacing={2}
+                  sx={{
+                    mb: 2,
+                    flexWrap: 'wrap',
+                    animation: imageError ? `${shake} 0.5s ease-in-out` : 'none',
+                  }}
+                >
                   {listing.images.map((image, index) => (
                     <Box
                       key={index}
@@ -405,6 +516,10 @@ function EditListing() {
                       height: 150,
                       borderRadius: 2,
                       mb: 2,
+                      borderColor: imageError ? 'error.main' : 'divider',
+                      '&:hover': {
+                        borderColor: imageError ? 'error.main' : 'primary.main',
+                      },
                     }}
                   >
                     Add Image
@@ -441,6 +556,16 @@ function EditListing() {
           </form>
         </Paper>
       </Box>
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
+          At least one image is required
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

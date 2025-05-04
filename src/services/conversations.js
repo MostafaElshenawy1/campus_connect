@@ -27,10 +27,12 @@ const getCurrentUserId = () => {
 };
 
 // Create a conversation ID that's consistent between two users
-const createConversationId = (userId1, userId2) => {
+const createConversationId = (userId1, userId2, listingId = null) => {
   // Sort the IDs to ensure the same conversation ID is generated regardless of order
   const sortedIds = [userId1, userId2].sort();
-  return `${sortedIds[0]}_${sortedIds[1]}`;
+  return listingId
+    ? `${sortedIds[0]}_${sortedIds[1]}_${listingId}`
+    : `${sortedIds[0]}_${sortedIds[1]}`;
 };
 
 // Create a new conversation or get an existing one
@@ -39,7 +41,7 @@ export const getOrCreateConversation = async (otherUserId, listingId = null) => 
   if (!currentUserId) throw new Error('User not authenticated');
 
   try {
-    const conversationId = createConversationId(currentUserId, otherUserId);
+    const conversationId = createConversationId(currentUserId, otherUserId, listingId);
     const conversationRef = doc(db, 'conversations', conversationId);
     const conversationDoc = await getDoc(conversationRef);
 

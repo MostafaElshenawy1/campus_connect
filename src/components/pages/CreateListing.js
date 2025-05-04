@@ -15,12 +15,22 @@ import {
   Alert,
   IconButton,
   Stack,
+  Snackbar,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { collection, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../../config/firebase';
 import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
+import { keyframes } from '@mui/system';
+
+// Add shake animation
+const shake = keyframes`
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+  100% { transform: translateX(0); }
+`;
 
 const categories = [
   'Books',
@@ -49,7 +59,8 @@ const locations = [
 function CreateListing() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [imageError, setImageError] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [listing, setListing] = useState({
     title: '',
     description: '',
@@ -63,6 +74,38 @@ function CreateListing() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+
+    // Special handling for price to ensure it's non-negative and only contains numbers
+    if (name === 'price') {
+      // Remove any non-digit characters
+      const numericValue = value.replace(/\D/g, '');
+      if (numericValue === '') {
+        setListing(prev => ({
+          ...prev,
+          [name]: '',
+        }));
+        return;
+      }
+
+      // Convert to number and check if negative or exceeds max
+      const numValue = Number(numericValue);
+      if (numValue < 0) {
+        return;
+      }
+
+      // If number exceeds max, set to max value
+      const finalValue = numValue > 99999 ? 99999 : numValue;
+
+      // Format with commas
+      const formattedValue = finalValue.toLocaleString();
+
+      setListing(prev => ({
+        ...prev,
+        [name]: formattedValue,
+      }));
+      return;
+    }
+
     setListing(prev => ({
       ...prev,
       [name]: value,
@@ -71,13 +114,26 @@ function CreateListing() {
     }));
   };
 
+  const handleKeyPress = (e) => {
+    const { name } = e.target;
+    if (name === 'price') {
+      // Only allow numbers and control keys (backspace, delete, etc)
+      const char = String.fromCharCode(e.which);
+      if (!/[\d]/.test(char) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+      }
+    }
+  };
+
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
     setImages(prev => [...prev, ...files]);
+    setImageError(false);
   };
 
   const handleRemoveImage = (index) => {
     setImages(prev => prev.filter((_, i) => i !== index));
+    setImageError(false);
   };
 
   const uploadImages = async () => {
@@ -107,11 +163,20 @@ function CreateListing() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
 
     try {
       if (!auth.currentUser) {
         throw new Error('You must be logged in to create a listing');
+      }
+
+      if (images.length === 0) {
+        setImageError(true);
+        setSnackbarOpen(true);
+        // Reset image error state after animation completes
+        setTimeout(() => {
+          setImageError(false);
+        }, 500);
+        throw new Error('At least one image is required');
       }
 
       // Upload images first
@@ -123,8 +188,8 @@ function CreateListing() {
         images: imageUrls,
         userId: auth.currentUser.uid,
         createdAt: new Date(),
-        price: Number(listing.price), // Ensure price is stored as a number
-        // Use customLocation if location is "Other"
+        // Remove commas and convert to number for storage
+        price: Number(listing.price.replace(/,/g, '')),
         location: listing.location === 'Other' ? listing.customLocation : listing.location,
       };
 
@@ -132,10 +197,13 @@ function CreateListing() {
       navigate('/my-listings');
     } catch (error) {
       console.error('Error creating listing:', error);
-      setError(error.message || 'Error creating listing');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbarOpen(false);
   };
 
   return (
@@ -144,11 +212,6 @@ function CreateListing() {
         <Typography variant="h4" sx={{ fontWeight: 700, mb: 4 }}>
           Create New Listing
         </Typography>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
         <Paper sx={{ p: 4, borderRadius: 3 }}>
           <form onSubmit={handleSubmit}>
             <Grid container spacing={3}>
@@ -179,9 +242,10 @@ function CreateListing() {
                   fullWidth
                   label="Price"
                   name="price"
-                  type="number"
+                  type="text"
                   value={listing.price}
                   onChange={handleChange}
+                  onKeyPress={handleKeyPress}
                   InputProps={{
                     startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
                   }}
@@ -255,7 +319,15 @@ function CreateListing() {
                 <Typography variant="h6" gutterBottom>
                   Images
                 </Typography>
-                <Stack direction="row" spacing={2} sx={{ mb: 2, flexWrap: 'wrap' }}>
+                <Stack
+                  direction="row"
+                  spacing={2}
+                  sx={{
+                    mb: 2,
+                    flexWrap: 'wrap',
+                    animation: imageError ? `${shake} 0.5s ease-in-out` : 'none',
+                  }}
+                >
                   {images.map((file, index) => (
                     <Box
                       key={index}
@@ -304,6 +376,10 @@ function CreateListing() {
                       height: 150,
                       borderRadius: 2,
                       mb: 2,
+                      borderColor: imageError ? 'error.main' : 'divider',
+                      '&:hover': {
+                        borderColor: imageError ? 'error.main' : 'primary.main',
+                      },
                     }}
                   >
                     Add Image
@@ -340,6 +416,16 @@ function CreateListing() {
           </form>
         </Paper>
       </Box>
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
+          At least one image is required
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }
