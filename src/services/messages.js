@@ -1,15 +1,12 @@
 import {
   collection,
-  addDoc,
   query,
-  where,
   orderBy,
   getDocs,
   updateDoc,
   doc,
   serverTimestamp,
   writeBatch,
-  or,
   getDoc,
   setDoc,
   increment

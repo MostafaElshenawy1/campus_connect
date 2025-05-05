@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Box,
@@ -43,7 +43,7 @@ function Profile() {
   });
   const navigate = useNavigate();
 
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     try {
       if (!auth.currentUser) {
         navigate('/signin');
@@ -77,11 +77,11 @@ function Profile() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
 
   useEffect(() => {
     fetchUserData();
-  }, [auth.currentUser, navigate]);
+  }, [fetchUserData]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;

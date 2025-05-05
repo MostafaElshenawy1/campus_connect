@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Grid,
@@ -7,7 +7,7 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import { collection, query, where, getDocs, doc, getDoc, writeBatch, arrayRemove, increment, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, writeBatch, arrayRemove, increment, arrayUnion } from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
 import ListingCard from '../common/ListingCard';
@@ -19,11 +19,7 @@ function LikedListings() {
   const [likedListings, setLikedListings] = useState([]);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchLikedListings();
-  }, []);
-
-  const fetchLikedListings = async () => {
+  const fetchLikedListings = useCallback(async () => {
     setLoading(true);
     try {
       const user = auth.currentUser;
@@ -59,7 +55,11 @@ function LikedListings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    fetchLikedListings();
+  }, [fetchLikedListings]);
 
   const handleLike = async (listingId) => {
     try {

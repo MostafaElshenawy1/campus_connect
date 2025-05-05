@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -7,7 +7,6 @@ import {
   ListItemText,
   ListItemAvatar,
   Avatar,
-  Divider,
   TextField,
   Button,
   Paper,
@@ -23,7 +22,7 @@ import {
   useMediaQuery
 } from '@mui/material';
 import { Send as SendIcon, AttachMoney as AttachMoneyIcon, ArrowBack as ArrowBackIcon, ChatBubbleOutline as ChatBubbleIcon } from '@mui/icons-material';
-import { getConversations, getMessages, sendMessage, handleOfferResponse } from '../../services/conversations';
+import { sendMessage, handleOfferResponse } from '../../services/conversations';
 import { formatDistanceToNow } from 'date-fns';
 import { getAuth } from 'firebase/auth';
 import {
@@ -52,12 +51,9 @@ const Messages = () => {
   const [loading, setLoading] = useState(true);
   const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
-  const [selectedMessage, setSelectedMessage] = useState(null);
-  const [error, setError] = useState(null);
   const [counterOfferDialogOpen, setCounterOfferDialogOpen] = useState(false);
   const [selectedOfferMessage, setSelectedOfferMessage] = useState(null);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const [isSwitchingConversation, setIsSwitchingConversation] = useState(false);
   const location = useLocation();
   const [counterOfferAmount, setCounterOfferAmount] = useState('');
   const [counterOfferMessage, setCounterOfferMessage] = useState('');
@@ -138,7 +134,7 @@ const Messages = () => {
     return () => {
       unsubscribeConversations();
     };
-  }, []);
+  }, [conversations.length, loading]);
 
   useEffect(() => {
     if (!selectedConversation) return;
@@ -186,28 +182,7 @@ const Messages = () => {
     return () => {
       unsubscribeMessages();
     };
-  }, [selectedConversation?.id]);
-
-  const loadMessages = async (conversationId) => {
-    try {
-      if (!isSwitchingConversation) {
-        setLoading(true);
-      }
-
-      const messagesData = await getMessages(conversationId);
-      setMessages(messagesData);
-      setAllMessages(prev => ({
-        ...prev,
-        [conversationId]: messagesData
-      }));
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    } finally {
-      if (!isSwitchingConversation) {
-        setLoading(false);
-      }
-    }
-  };
+  }, [selectedConversation]);
 
   const scrollToBottom = (behavior = 'smooth') => {
     if (messagesEndRef.current) {
@@ -247,9 +222,8 @@ const Messages = () => {
 
       // Scroll to bottom after sending
       scrollToBottom();
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setError('Failed to send message');
+    } catch (err) {
+      console.error('Error sending message:', err);
     }
   };
 
@@ -291,7 +265,6 @@ const Messages = () => {
 
   const handleSendOffer = async () => {
     if (!offerAmount) {
-      setError('Please enter a valid offer amount');
       return;
     }
 
@@ -312,7 +285,6 @@ const Messages = () => {
       setOfferAmount('');
     } catch (error) {
       console.error('Error sending offer:', error);
-      setError('Failed to send offer. Please try again.');
     }
   };
 
@@ -355,10 +327,7 @@ const Messages = () => {
     setCounterOfferDialogOpen(true);
   };
 
-  const handleSelectConversation = (conversation) => {
-    // Set flag to indicate we're switching conversations
-    setIsSwitchingConversation(true);
-
+  const handleSelectConversation = useCallback((conversation) => {
     // Use cached messages if available
     if (allMessages[conversation.id]) {
       setMessages(allMessages[conversation.id]);
@@ -368,12 +337,7 @@ const Messages = () => {
 
     // Set the selected conversation
     setSelectedConversation(conversation);
-
-    // Reset the flag after a short delay to allow the UI to update
-    setTimeout(() => {
-      setIsSwitchingConversation(false);
-    }, 100);
-  };
+  }, [allMessages]);
 
   // Add this new useEffect to handle URL parameters
   useEffect(() => {
@@ -386,15 +350,13 @@ const Messages = () => {
         handleSelectConversation(conversation);
       }
     }
-  }, [conversations, location.search]);
+  }, [conversations, location.search, handleSelectConversation]);
 
   const renderMessage = (message) => {
     const isCurrentUser = message.senderId === getAuth().currentUser.uid;
     const isOffer = message.isOffer;
     const isPending = message.status === 'pending';
     const isRescinded = message.status === 'rescinded';
-    const isAccepted = message.status === 'accepted';
-    const isRejected = message.status === 'rejected';
 
     const getStatusColor = (status) => {
       switch (status) {
@@ -741,7 +703,6 @@ const Messages = () => {
 
   const handleSendCounterOffer = async () => {
     if (!counterOfferAmount) {
-      setError('Please enter a valid offer amount');
       return;
     }
 
@@ -774,7 +735,6 @@ const Messages = () => {
       setCounterOfferMessage('');
     } catch (error) {
       console.error('Error sending counter offer:', error);
-      setError('Failed to send counter offer. Please try again.');
     }
   };
 
@@ -804,7 +764,6 @@ const Messages = () => {
       overflow: 'hidden',
     }}>
       <Box sx={{
-        width: '100%',
         maxWidth: '1200px',
         margin: '0 auto',
         height: '100%',
@@ -939,7 +898,6 @@ const Messages = () => {
         {selectedConversation ? (
           <Box
             sx={{
-              width: '100%',
               height: '100%',
               display: 'flex',
               flexDirection: 'column',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Grid,
@@ -15,16 +15,9 @@ import {
   Slider,
   Drawer,
   IconButton,
-  useTheme,
-  useMediaQuery,
   CircularProgress,
   Alert,
-  Stack,
   Chip,
-  Card,
-  CardContent,
-  CardMedia,
-  CardActions,
   Menu,
   ListItemIcon,
   ListItemText,
@@ -33,14 +26,10 @@ import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   Close as CloseIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
   AccessTime as TimeIcon,
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
-import { collection, query, where, orderBy, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc, writeBatch, limit, increment } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, arrayUnion, arrayRemove, getDoc, writeBatch, increment } from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
 import ListingCard from '../common/ListingCard';
@@ -50,23 +39,29 @@ const categories = ['All', 'Electronics', 'Furniture', 'Books', 'Clothing', 'Oth
 const conditions = ['All', 'New', 'Like New', 'Good', 'Fair', 'Poor'];
 
 function Browse() {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filters, setFilters] = useState({
     category: 'All',
     condition: 'All',
-    priceRange: [0, 2000],
+    priceRange: [0, 1000],
     location: 'All',
     search: '',
   });
+  const [priceInputs, setPriceInputs] = useState({ min: 0, max: 1000 });
+  const [pricePresets] = useState([
+    { label: 'Under $50', range: [0, 50] },
+    { label: '$50 - $100', range: [50, 100] },
+    { label: '$100 - $200', range: [100, 200] },
+    { label: '$200 - $500', range: [200, 500] },
+    { label: '$500 - $1000', range: [500, 990] },
+    { label: '1000+', range: [1000, 1000] },
+  ]);
   const [sortBy, setSortBy] = useState('newest');
   const [allListings, setAllListings] = useState([]);
   const [displayedListings, setDisplayedListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [likedListings, setLikedListings] = useState([]);
-  const [selectedImages, setSelectedImages] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAnchorEl, setFilterAnchorEl] = useState(null);
   const navigate = useNavigate();
@@ -75,9 +70,96 @@ function Browse() {
     fetchAllListings();
   }, []);
 
+  const applyFiltersAndSort = useCallback(async () => {
+    let filteredListings = [...allListings];
+
+    if (searchQuery.trim()) {
+      const searchLower = searchQuery.toLowerCase().trim();
+      filteredListings = filteredListings.filter(listing =>
+        listing.title.toLowerCase().includes(searchLower)
+      );
+    }
+
+    if (filters.category !== 'All') {
+      filteredListings = filteredListings.filter(listing =>
+        listing.category === filters.category
+      );
+    }
+
+    if (filters.condition !== 'All') {
+      filteredListings = filteredListings.filter(listing =>
+        listing.condition === filters.condition
+      );
+    }
+
+    if (filters.location !== 'All') {
+      filteredListings = filteredListings.filter(listing =>
+        listing.location === filters.location
+      );
+    }
+
+    // Special handling for price range
+    filteredListings = filteredListings.filter(listing => {
+      const price = listing.price;
+      const [min, max] = filters.priceRange;
+
+      if (max === 1000) {
+        // For 1000+, show all listings with price >= min
+        return price >= min;
+      } else {
+        // For normal ranges, show items <= max
+        return price >= min && price <= max;
+      }
+    });
+
+    switch (sortBy) {
+      case 'newest':
+        filteredListings.sort((a, b) => b.createdAt - a.createdAt);
+        break;
+      case 'oldest':
+        filteredListings.sort((a, b) => a.createdAt - b.createdAt);
+        break;
+      case 'price-asc':
+        filteredListings.sort((a, b) => a.price - b.price);
+        break;
+      case 'price-desc':
+        filteredListings.sort((a, b) => b.price - a.price);
+        break;
+      default:
+        break;
+    }
+
+    setDisplayedListings(filteredListings);
+
+    try {
+      if (auth.currentUser) {
+        const userRef = doc(db, 'users', auth.currentUser.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          setLikedListings(userDoc.data().likedListings || []);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching liked listings:', error);
+    }
+  }, [allListings, filters, searchQuery, sortBy]);
+
   useEffect(() => {
     applyFiltersAndSort();
-  }, [filters, sortBy, searchQuery, allListings]);
+  }, [applyFiltersAndSort]);
+
+  useEffect(() => {
+    // Find the maximum price from all listings
+    if (allListings.length > 0) {
+      const max = Math.max(...allListings.map(listing => listing.price));
+      // Cap at 1000 for the slider
+      const newMaxPrice = Math.min(1000, Math.ceil(max / 10) * 10);
+      setFilters(prev => ({
+        ...prev,
+        priceRange: [prev.priceRange[0], Math.min(prev.priceRange[1], newMaxPrice)]
+      }));
+    }
+  }, [allListings]);
 
   const fetchAllListings = async () => {
     setLoading(true);
@@ -109,88 +191,46 @@ function Browse() {
     }
   };
 
-  const applyFiltersAndSort = async () => {
-    let filteredListings = [...allListings];
-
-    if (searchQuery.trim()) {
-      const searchLower = searchQuery.toLowerCase().trim();
-      filteredListings = filteredListings.filter(listing =>
-        listing.title.toLowerCase().includes(searchLower)
-      );
-    }
-
-    if (filters.category !== 'All') {
-      filteredListings = filteredListings.filter(listing =>
-        listing.category === filters.category
-      );
-    }
-
-    if (filters.condition !== 'All') {
-      filteredListings = filteredListings.filter(listing =>
-        listing.condition === filters.condition
-      );
-    }
-
-    if (filters.location !== 'All') {
-      filteredListings = filteredListings.filter(listing =>
-        listing.location === filters.location
-      );
-    }
-
-    filteredListings = filteredListings.filter(listing =>
-      listing.price >= filters.priceRange[0] && listing.price <= filters.priceRange[1]
-    );
-
-    switch (sortBy) {
-      case 'newest':
-        filteredListings.sort((a, b) => b.createdAt - a.createdAt);
-        break;
-      case 'oldest':
-        filteredListings.sort((a, b) => a.createdAt - b.createdAt);
-        break;
-      case 'price-asc':
-        filteredListings.sort((a, b) => a.price - b.price);
-        break;
-      case 'price-desc':
-        filteredListings.sort((a, b) => b.price - a.price);
-        break;
-    }
-
-    setDisplayedListings(filteredListings);
-
-    const initialSelectedImages = {};
-    filteredListings.forEach(listing => {
-      initialSelectedImages[listing.id] = 0;
-    });
-    setSelectedImages(initialSelectedImages);
-
-    try {
-      if (auth.currentUser) {
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        const userDoc = await getDoc(userRef);
-        if (userDoc.exists()) {
-          setLikedListings(userDoc.data().likedListings || []);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching liked listings:', error);
-    }
-  };
-
   const handleFilterChange = (field, value) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
-  const handlePriceRangeChange = (event, newValue) => {
-    setFilters(prev => ({ ...prev, tempPriceRange: newValue }));
+  const handlePriceInputChange = (field, value) => {
+    // Remove any non-digit characters
+    const numericValue = value.replace(/\D/g, '');
+    if (numericValue === '') {
+      setPriceInputs(prev => ({ ...prev, [field]: '' }));
+      return;
+    }
+
+    // Convert to number and check if negative
+    const numValue = Number(numericValue);
+    if (numValue < 0) return;
+
+    // Cap at 1000 for the slider
+    const cappedValue = Math.min(1000, numValue);
+
+    // Update the input value
+    setPriceInputs(prev => ({ ...prev, [field]: cappedValue }));
+
+    // Update the price range
+    const newRange = [...filters.priceRange];
+    if (field === 'min') {
+      newRange[0] = cappedValue;
+    } else {
+      newRange[1] = cappedValue;
+    }
+    setFilters(prev => ({ ...prev, priceRange: newRange }));
   };
 
-  const handlePriceRangeChangeCommitted = (event, newValue) => {
-    setFilters(prev => ({
-      ...prev,
-      priceRange: newValue,
-      tempPriceRange: newValue
-    }));
+  const handlePricePresetClick = (range) => {
+    setFilters(prev => ({ ...prev, priceRange: range }));
+    setPriceInputs({ min: range[0], max: range[1] });
+  };
+
+  const handlePriceRangeChange = (event, newValue) => {
+    setFilters(prev => ({ ...prev, priceRange: newValue }));
+    setPriceInputs({ min: newValue[0], max: newValue[1] });
   };
 
   const handleSortChange = (value) => {
@@ -209,18 +249,6 @@ function Browse() {
 
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
-  };
-
-  const handleViewClick = (listingId) => {
-    navigate(`/listings/${listingId}`);
-  };
-
-  const handleEditClick = (listingId) => {
-    navigate(`/edit-listing/${listingId}`);
-  };
-
-  const handleMessageClick = (listingId) => {
-    navigate(`/messages?listing=${listingId}`);
   };
 
   const handleLike = async (listingId) => {
@@ -291,24 +319,6 @@ function Browse() {
     }
   };
 
-  const handlePreviousImage = (listingId, e) => {
-    e.stopPropagation();
-    setSelectedImages(prev => {
-      const currentIndex = prev[listingId];
-      const newIndex = currentIndex === 0 ? displayedListings.find(l => l.id === listingId).images.length - 1 : currentIndex - 1;
-      return { ...prev, [listingId]: newIndex };
-    });
-  };
-
-  const handleNextImage = (listingId, e) => {
-    e.stopPropagation();
-    setSelectedImages(prev => {
-      const currentIndex = prev[listingId];
-      const newIndex = currentIndex === displayedListings.find(l => l.id === listingId).images.length - 1 ? 0 : currentIndex + 1;
-      return { ...prev, [listingId]: newIndex };
-    });
-  };
-
   const handleFilterClick = (event) => {
     setFilterAnchorEl(event.currentTarget);
   };
@@ -370,18 +380,67 @@ function Browse() {
       </FormControl>
 
       <Typography gutterBottom>Price Range</Typography>
+      <Box sx={{ mb: 2 }}>
+        <Grid container spacing={2}>
+          <Grid item xs={6}>
+            <TextField
+              fullWidth
+              label="Min Price"
+              value={priceInputs.min === 0 ? '0' : priceInputs.min}
+              onChange={(e) => handlePriceInputChange('min', e.target.value)}
+              InputProps={{
+                startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
+              }}
+              size="small"
+            />
+          </Grid>
+          <Grid item xs={6}>
+            <TextField
+              fullWidth
+              label="Max Price"
+              value={priceInputs.max === 1000 ? '1000+' : priceInputs.max}
+              onChange={(e) => handlePriceInputChange('max', e.target.value)}
+              InputProps={{
+                startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
+              }}
+              size="small"
+            />
+          </Grid>
+        </Grid>
+      </Box>
+
       <Slider
-        value={filters.tempPriceRange || filters.priceRange}
+        value={filters.priceRange}
         onChange={handlePriceRangeChange}
-        onChangeCommitted={handlePriceRangeChangeCommitted}
         valueLabelDisplay="auto"
+        valueLabelFormat={(value) => value === 1000 ? '1000+' : `$${value}`}
         min={0}
-        max={2000}
+        max={1000}
         step={10}
+        marks={[
+          { value: 0, label: '$0' },
+          { value: 250, label: '$250' },
+          { value: 500, label: '$500' },
+          { value: 750, label: '$750' },
+          { value: 1000, label: '$1000+' }
+        ]}
+        sx={{ mb: 2 }}
       />
-      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Typography>${filters.tempPriceRange?.[0] || filters.priceRange[0]}</Typography>
-        <Typography>${filters.tempPriceRange?.[1] || filters.priceRange[1]}</Typography>
+
+      <Typography variant="subtitle2" gutterBottom>
+        Quick Select
+      </Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+        {pricePresets.map((preset) => (
+          <Chip
+            key={preset.label}
+            label={preset.label}
+            onClick={() => handlePricePresetClick(preset.range)}
+            color={filters.priceRange[0] === preset.range[0] && filters.priceRange[1] === preset.range[1] ? 'primary' : 'default'}
+            variant={filters.priceRange[0] === preset.range[0] && filters.priceRange[1] === preset.range[1] ? 'filled' : 'outlined'}
+            sx={{ mb: 1 }}
+          />
+        ))}
       </Box>
 
       <Button
@@ -538,18 +597,67 @@ function Browse() {
                 </FormControl>
 
                 <Typography gutterBottom>Price Range</Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Min Price"
+                        value={priceInputs.min === 0 ? '0' : priceInputs.min}
+                        onChange={(e) => handlePriceInputChange('min', e.target.value)}
+                        InputProps={{
+                          startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
+                        }}
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Max Price"
+                        value={priceInputs.max === 1000 ? '1000+' : priceInputs.max}
+                        onChange={(e) => handlePriceInputChange('max', e.target.value)}
+                        InputProps={{
+                          startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
+                        }}
+                        size="small"
+                      />
+                    </Grid>
+                  </Grid>
+                </Box>
+
                 <Slider
-                  value={filters.tempPriceRange || filters.priceRange}
+                  value={filters.priceRange}
                   onChange={handlePriceRangeChange}
-                  onChangeCommitted={handlePriceRangeChangeCommitted}
                   valueLabelDisplay="auto"
+                  valueLabelFormat={(value) => value === 1000 ? '1000+' : `$${value}`}
                   min={0}
-                  max={2000}
+                  max={1000}
                   step={10}
+                  marks={[
+                    { value: 0, label: '$0' },
+                    { value: 250, label: '$250' },
+                    { value: 500, label: '$500' },
+                    { value: 750, label: '$750' },
+                    { value: 1000, label: '$1000+' }
+                  ]}
+                  sx={{ mb: 2 }}
                 />
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography>${filters.tempPriceRange?.[0] || filters.priceRange[0]}</Typography>
-                  <Typography>${filters.tempPriceRange?.[1] || filters.priceRange[1]}</Typography>
+
+                <Typography variant="subtitle2" gutterBottom>
+                  Quick Select
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  {pricePresets.map((preset) => (
+                    <Chip
+                      key={preset.label}
+                      label={preset.label}
+                      onClick={() => handlePricePresetClick(preset.range)}
+                      color={filters.priceRange[0] === preset.range[0] && filters.priceRange[1] === preset.range[1] ? 'primary' : 'default'}
+                      variant={filters.priceRange[0] === preset.range[0] && filters.priceRange[1] === preset.range[1] ? 'filled' : 'outlined'}
+                      sx={{ mb: 1 }}
+                    />
+                  ))}
                 </Box>
               </Box>
             </Paper>

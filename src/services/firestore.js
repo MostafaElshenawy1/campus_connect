@@ -11,7 +11,8 @@ import {
   orderBy,
   limit,
   startAfter,
-  serverTimestamp
+  serverTimestamp,
+  setDoc
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -140,92 +141,6 @@ export const updateUserProfile = async (userId, userData) => {
       ...userData,
       updatedAt: serverTimestamp()
     });
-  } catch (error) {
-    throw error;
-  }
-};
-
-// Groups
-export const groupsCollection = collection(db, 'groups');
-
-export const createGroup = async (groupData) => {
-  try {
-    const docRef = await addDoc(groupsCollection, {
-      ...groupData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    return docRef.id;
-  } catch (error) {
-    throw error;
-  }
-};
-
-export const getGroup = async (id) => {
-  try {
-    const docRef = doc(db, 'groups', id);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      return { id: docSnap.id, ...docSnap.data() };
-    }
-    return null;
-  } catch (error) {
-    throw error;
-  }
-};
-
-export const getGroups = async (filters = {}, lastDoc = null, pageSize = 10) => {
-  try {
-    let q = query(groupsCollection);
-
-    // Apply filters
-    if (filters.category) {
-      q = query(q, where('category', '==', filters.category));
-    }
-    if (filters.isPublic !== undefined) {
-      q = query(q, where('isPublic', '==', filters.isPublic));
-    }
-
-    // Apply sorting
-    q = query(q, orderBy('createdAt', 'desc'));
-
-    // Apply pagination
-    if (lastDoc) {
-      q = query(q, startAfter(lastDoc));
-    }
-    q = query(q, limit(pageSize));
-
-    const querySnapshot = await getDocs(q);
-    const groups = [];
-    querySnapshot.forEach((doc) => {
-      groups.push({ id: doc.id, ...doc.data() });
-    });
-
-    return {
-      groups,
-      lastDoc: querySnapshot.docs[querySnapshot.docs.length - 1]
-    };
-  } catch (error) {
-    throw error;
-  }
-};
-
-export const updateGroup = async (id, groupData) => {
-  try {
-    const docRef = doc(db, 'groups', id);
-    await updateDoc(docRef, {
-      ...groupData,
-      updatedAt: serverTimestamp()
-    });
-  } catch (error) {
-    throw error;
-  }
-};
-
-export const deleteGroup = async (id) => {
-  try {
-    const docRef = doc(db, 'groups', id);
-    await deleteDoc(docRef);
   } catch (error) {
     throw error;
   }

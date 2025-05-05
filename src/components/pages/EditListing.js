@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Box,
@@ -61,7 +61,6 @@ function EditListing() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [imageError, setImageError] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [listing, setListing] = useState({
@@ -77,13 +76,8 @@ function EditListing() {
   const [newImages, setNewImages] = useState([]);
   const [imagesToDelete, setImagesToDelete] = useState([]);
 
-  useEffect(() => {
-    fetchListing();
-  }, [id]);
-
-  const fetchListing = async () => {
+  const fetchListing = useCallback(async () => {
     setLoading(true);
-    setError(null);
 
     try {
       const docRef = doc(db, 'listings', id);
@@ -100,15 +94,19 @@ function EditListing() {
           price: data.price.toLocaleString(),
         });
       } else {
-        setError('Listing not found');
+        setSnackbarOpen(true);
       }
-    } catch (error) {
-      console.error('Error fetching listing:', error);
-      setError('Error loading listing');
+    } catch (err) {
+      console.error('Error fetching listing:', err);
+      setSnackbarOpen(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchListing();
+  }, [fetchListing]);
 
   const handleKeyPress = (e) => {
     const { name } = e.target;
@@ -166,16 +164,15 @@ function EditListing() {
     const files = Array.from(event.target.files);
     const validFiles = files.filter(file => {
       if (!file.type.startsWith('image/')) {
-        setError(`${file.name} is not a valid image file`);
+        setImageError(`${file.name} is not a valid image file`);
         return false;
       }
       return true;
     });
 
     if (validFiles.length > 0) {
-      setError(null);
+      setImageError(null);
       setNewImages(prev => [...prev, ...validFiles]);
-      setImageError(false);
     }
   };
 
@@ -232,7 +229,6 @@ function EditListing() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
 
     try {
       // Check if there are any images (either existing or new)
@@ -291,7 +287,7 @@ function EditListing() {
       navigate('/my-listings');
     } catch (error) {
       console.error('Error updating listing:', error);
-      setError(error.message || 'Error updating listing');
+      setImageError(error.message || 'Error updating listing');
     } finally {
       setLoading(false);
     }
@@ -443,7 +439,7 @@ function EditListing() {
                     >
                       <img
                         src={image}
-                        alt={`Listing ${index + 1}`}
+                        alt={`Item ${index + 1}`}
                         style={{
                           width: '100%',
                           height: '100%',
@@ -482,7 +478,7 @@ function EditListing() {
                     >
                       <img
                         src={URL.createObjectURL(file)}
-                        alt={`New image ${index + 1}`}
+                        alt={`Upload ${index + 1}`}
                         style={{
                           width: '100%',
                           height: '100%',

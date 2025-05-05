@@ -7,7 +7,6 @@ import CreateListing from './components/pages/CreateListing';
 import EditListing from './components/pages/EditListing';
 import Profile from './components/pages/Profile';
 import Messages from './components/pages/Messages';
-import Groups from './components/pages/Groups';
 import ListingDetails from './components/pages/ListingDetails';
 import MyListings from './components/pages/MyListings';
 import LikedListings from './components/pages/LikedListings';
@@ -82,14 +81,6 @@ function AppContent({ user }) {
             element={
               <ProtectedRoute user={user}>
                 <EditListing />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/groups"
-            element={
-              <ProtectedRoute user={user}>
-                <Groups />
               </ProtectedRoute>
             }
           />

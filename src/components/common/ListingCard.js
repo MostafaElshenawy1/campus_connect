@@ -15,7 +15,7 @@ import {
   Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { handleLike, getLikeCount, formatLikeCount, checkIfLiked } from '../../services/likes';
+import { handleLike, formatLikeCount } from '../../services/likes';
 import LocationIcon from '@mui/icons-material/LocationOn';
 import ListingImageSlider from './ListingImageSlider';
 
