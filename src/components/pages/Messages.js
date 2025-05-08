@@ -19,7 +19,8 @@ import {
   DialogActions,
   Stack,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Container
 } from '@mui/material';
 import { Send as SendIcon, AttachMoney as AttachMoneyIcon, ArrowBack as ArrowBackIcon, ChatBubbleOutline as ChatBubbleIcon } from '@mui/icons-material';
 import { sendMessage, handleOfferResponse } from '../../services/conversations';
@@ -763,9 +764,7 @@ const Messages = () => {
       bgcolor: 'background.default',
       overflow: 'hidden',
     }}>
-      <Box sx={{
-        maxWidth: '1200px',
-        margin: '0 auto',
+      <Container maxWidth="lg" disableGutters sx={{
         height: '100%',
         display: 'flex',
         position: 'relative',
@@ -775,6 +774,7 @@ const Messages = () => {
         border: '1px solid',
         borderColor: 'divider',
         bgcolor: 'background.paper',
+        flex: 1,
       }}>
         <Paper
           elevation={0}
@@ -1262,7 +1262,7 @@ const Messages = () => {
             </Button>
           </DialogActions>
         </Dialog>
-      </Box>
+      </Container>
     </Box>
   );
 };

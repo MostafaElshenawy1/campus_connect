@@ -7,7 +7,14 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import { doc, getDoc, writeBatch, arrayRemove, increment, arrayUnion } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  writeBatch,
+  arrayRemove,
+  increment,
+  arrayUnion,
+} from 'firebase/firestore';
 import { db, auth } from '../../config/firebase';
 import { useNavigate } from 'react-router-dom';
 import ListingCard from '../common/ListingCard';
@@ -42,7 +49,7 @@ function LikedListings() {
         if (listingDoc.exists()) {
           listingsData.push({
             id: listingDoc.id,
-            ...listingDoc.data()
+            ...listingDoc.data(),
           });
         }
       }
@@ -77,53 +84,57 @@ function LikedListings() {
       // Update user's liked listings
       if (isLiked) {
         batch.update(userRef, {
-          likedListings: arrayRemove(listingId)
+          likedListings: arrayRemove(listingId),
         });
       } else {
         batch.update(userRef, {
-          likedListings: arrayUnion(listingId)
+          likedListings: arrayUnion(listingId),
         });
       }
 
       // Update listing's like count
       batch.update(listingRef, {
-        likes: increment(isLiked ? -1 : 1)
+        likes: increment(isLiked ? -1 : 1),
       });
 
       // Update local state before the batch commit to make it feel instant
-      setLikedListings(prev =>
-        isLiked ? prev.filter(id => id !== listingId) : [...prev, listingId]
+      setLikedListings((prev) =>
+        isLiked ? prev.filter((id) => id !== listingId) : [...prev, listingId]
       );
 
       // Update the like count in the UI without removing the listing
-      setListings(prev => prev.map(listing => {
-        if (listing.id === listingId) {
-          return {
-            ...listing,
-            likes: (listing.likes || 0) + (isLiked ? -1 : 1)
-          };
-        }
-        return listing;
-      }));
+      setListings((prev) =>
+        prev.map((listing) => {
+          if (listing.id === listingId) {
+            return {
+              ...listing,
+              likes: (listing.likes || 0) + (isLiked ? -1 : 1),
+            };
+          }
+          return listing;
+        })
+      );
 
       await batch.commit();
     } catch (error) {
       // Revert local state if the update fails
       const wasLiked = likedListings.includes(listingId);
-      setLikedListings(prev =>
-        wasLiked ? prev.filter(id => id !== listingId) : [...prev, listingId]
+      setLikedListings((prev) =>
+        wasLiked ? prev.filter((id) => id !== listingId) : [...prev, listingId]
       );
 
       // Revert the like count in the UI
-      setListings(prev => prev.map(listing => {
-        if (listing.id === listingId) {
-          return {
-            ...listing,
-            likes: (listing.likes || 0) + (wasLiked ? -1 : 1)
-          };
-        }
-        return listing;
-      }));
+      setListings((prev) =>
+        prev.map((listing) => {
+          if (listing.id === listingId) {
+            return {
+              ...listing,
+              likes: (listing.likes || 0) + (wasLiked ? -1 : 1),
+            };
+          }
+          return listing;
+        })
+      );
 
       console.error('Error in like operation:', error);
       setError(`Error updating like: ${error.message}`);

@@ -29,22 +29,16 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
 
   if (!senderId) throw new Error('User not authenticated');
   if (!receiverId) throw new Error('Receiver ID is required');
-  if (!content) throw new Error('Message content is required');
-
-  console.log('Send Message Details:');
-  console.log('- Auth state:', !!auth.currentUser);
-  console.log('- Sender ID:', senderId);
-  console.log('- Receiver ID:', receiverId);
-  console.log('- Content:', content);
-  console.log('- Is Offer:', isOffer);
-  console.log('- Offer Amount:', offerAmount);
-  console.log('- Listing ID:', listingId);
+  if (!isOffer) {
+    if (!content || !content.trim()) throw new Error('Message content is required');
+  } else {
+    if (typeof offerAmount !== 'number' || isNaN(offerAmount)) throw new Error('Offer amount is required for offers');
+    if (offerAmount <= 0) throw new Error('Offer amount must be positive');
+  }
 
   try {
     // Create conversation document first
     const conversationId = createConversationId(senderId, receiverId, listingId);
-    console.log('Generated Conversation ID:', conversationId);
-
     const conversationRef = doc(db, 'conversations', conversationId);
     const conversationDoc = await getDoc(conversationRef);
 
@@ -61,12 +55,8 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
       status: isOffer ? 'pending' : null
     };
 
-    console.log('Message Data:', messageData);
-
     // If conversation doesn't exist, create it first
     if (!conversationDoc.exists()) {
-      console.log('Creating new conversation');
-
       // Get the receiver's user data
       const receiverDoc = await getDoc(doc(db, 'users', receiverId));
       const receiverData = receiverDoc.exists() ? receiverDoc.data() : null;
@@ -94,29 +84,22 @@ export const sendMessage = async (receiverId, content, isOffer = false, offerAmo
         user: receiverData,
         listing: listingData
       };
-      console.log('New conversation data:', conversationData);
 
       // Create conversation first
       await setDoc(conversationRef, conversationData);
-      console.log('Conversation created successfully');
     } else {
       // Update existing conversation
-      console.log('Updating existing conversation');
       await updateDoc(conversationRef, {
         lastMessage: messageData,
         updatedAt: serverTimestamp(),
         [`unreadCount_${receiverId}`]: increment(1)
       });
-      console.log('Conversation updated successfully');
     }
 
     // Now add the message to the messages subcollection
     const messagesRef = collection(conversationRef, 'messages');
     const newMessageRef = doc(messagesRef);
-    console.log('Adding message to subcollection:', newMessageRef.id);
-
     await setDoc(newMessageRef, messageData);
-    console.log('Message added successfully');
 
     return {
       messageId: newMessageRef.id,

@@ -1,4 +1,11 @@
-import { doc, writeBatch, arrayUnion, arrayRemove, increment, getDoc } from 'firebase/firestore';
+import {
+  doc,
+  writeBatch,
+  arrayUnion,
+  arrayRemove,
+  increment,
+  getDoc,
+} from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
 
 export const handleLike = async (listingId, isLiked, onSuccess, onError) => {
@@ -17,18 +24,18 @@ export const handleLike = async (listingId, isLiked, onSuccess, onError) => {
     if (isLiked) {
       // Unlike: remove from user's likedListings and decrement listing's like count
       batch.update(userRef, {
-        likedListings: arrayRemove(listingId)
+        likedListings: arrayRemove(listingId),
       });
       batch.update(listingRef, {
-        likes: increment(-1)
+        likes: increment(-1),
       });
     } else {
       // Like: add to user's likedListings and increment listing's like count
       batch.update(userRef, {
-        likedListings: arrayUnion(listingId)
+        likedListings: arrayUnion(listingId),
       });
       batch.update(listingRef, {
-        likes: increment(1)
+        likes: increment(1),
       });
     }
 

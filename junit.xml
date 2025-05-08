@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="6" failures="6" errors="0" time="5.914">
+  <testsuite name="LikesService (Integration)" errors="0" failures="6" skipped="0" timestamp="2025-05-08T01:33:36" time="5.89" tests="6">
+    <testcase classname="LikesService (Integration) handleLike likeItem_authenticated_succeeds" name="LikesService (Integration) handleLike likeItem_authenticated_succeeds" time="0.548">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+    <testcase classname="LikesService (Integration) handleLike unlikeItem_authenticated_succeeds" name="LikesService (Integration) handleLike unlikeItem_authenticated_succeeds" time="0.9">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+    <testcase classname="LikesService (Integration) handleLike likeItem_alreadyLiked_noOp" name="LikesService (Integration) handleLike likeItem_alreadyLiked_noOp" time="0.989">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+    <testcase classname="LikesService (Integration) handleLike unlikeItem_notLiked_noOp" name="LikesService (Integration) handleLike unlikeItem_notLiked_noOp" time="0.992">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+    <testcase classname="LikesService (Integration) handleLike likeItem_nonExistentListing_throwsNotFound" name="LikesService (Integration) handleLike likeItem_nonExistentListing_throwsNotFound" time="0.869">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+    <testcase classname="LikesService (Integration) getLikeCount getLikesCount_returnsCorrectNumber" name="LikesService (Integration) getLikeCount getLikesCount_returnsCorrectNumber" time="0.938">
+      <failure>FirebaseError: Firebase: Error (auth/operation-not-allowed).
+    at createErrorInternal (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:146:55)
+    at _fail (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/util/assert.ts:65:9)
+    at _performFetchWithErrorHandling (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:234:9)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at _performSignInRequest (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/api/index.ts:255:26)
+    at _signInWithCredential (/Users/mostafaelshenawy/campus-connect/node_modules/@firebase/auth/src/core/strategies/credential.ts:44:20)</failure>
+      <failure>FirebaseError: 7 PERMISSION_DENIED: Missing or insufficient permissions.</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
