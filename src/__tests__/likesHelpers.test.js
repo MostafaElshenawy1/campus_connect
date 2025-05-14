@@ -6,7 +6,7 @@ const {
   getLikeDelta,
   getLikeLabel,
   applyLikeCallbacks,
-} = require('/src/test_services/likesHelpers');
+} = require('../test_services/likesHelpers');
 
 describe('Like Helpers (Pure)', () => {
   describe('formatLikeCount', () => {
