@@ -30,10 +30,10 @@ describe('Auth Validation Logic', () => {
   });
 
   describe('checkApprovedEduDomain', () => {
-    const allowed = ['harvard.edu', 'mit.edu'];
+    const allowed = ['scu.edu'];
 
     it('should allow an email from an approved domain', () => {
-      expect(() => checkApprovedEduDomain('alice@mit.edu', allowed)).not.toThrow();
+      expect(() => checkApprovedEduDomain('alice@scu.edu', allowed)).not.toThrow();
     });
 
     it('should reject an email from an unapproved .edu domain', () => {
