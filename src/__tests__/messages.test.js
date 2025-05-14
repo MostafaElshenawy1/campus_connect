@@ -40,8 +40,8 @@ import {
   increment
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { db } from '../../config/firebase';
-import { sendMessage } from '../../services/messages';
+import { db } from '../config/firebase';
+import { sendMessage } from '../services/messages';
 
 describe('MessagesService', () => {
   beforeEach(() => {
@@ -248,7 +248,7 @@ describe('MessagesService', () => {
       const mockBatch = { update: jest.fn(), commit: jest.fn().mockResolvedValue() };
       writeBatch.mockReturnValue(mockBatch);
       // Import the function (after mocks)
-      const { handleOfferResponse } = await import('../../services/messages');
+      const { handleOfferResponse } = await import('../services/messages');
       // Call accept
       const result = await handleOfferResponse(conversationId, messageId, true);
       // batch.update called with accepted status
@@ -286,7 +286,7 @@ describe('MessagesService', () => {
       const mockBatch = { update: jest.fn(), commit: jest.fn().mockResolvedValue() };
       writeBatch.mockReturnValue(mockBatch);
       // Import the function (after mocks)
-      const { handleOfferResponse } = await import('../../services/messages');
+      const { handleOfferResponse } = await import('../services/messages');
       // Call decline
       const result = await handleOfferResponse(conversationId, messageId, false);
       // batch.update called with declined status
