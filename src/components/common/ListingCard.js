@@ -7,6 +7,12 @@ import {
   IconButton,
   Stack,
   Chip,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
 } from '@mui/material';
 import {
   Favorite as FavoriteIcon,
@@ -28,10 +34,14 @@ function ListingCard({
   onDelete,
   isLiked: initialIsLiked,
   onLike,
+  onMarkAsSold,
 }) {
   const navigate = useNavigate();
   const [localLikeCount, setLocalLikeCount] = useState(listing.likes || 0);
   const [isLiked, setIsLiked] = useState(initialIsLiked || false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [soldPrice, setSoldPrice] = useState(listing.price);
+  const [priceError, setPriceError] = useState('');
 
   useEffect(() => {
     setIsLiked(initialIsLiked || false);
@@ -79,6 +89,28 @@ function ListingCard({
     if (onDelete) onDelete(listing);
   };
 
+  const handleMarkAsSoldClick = (e) => {
+    e.stopPropagation();
+    setSoldPrice(listing.price);
+    setDialogOpen(true);
+  };
+
+  const handleDialogClose = () => {
+    setDialogOpen(false);
+    setPriceError('');
+  };
+
+  const handleDialogConfirm = () => {
+    const numericPrice = Number(String(soldPrice).replace(/,/g, ''));
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      setPriceError('Please enter a valid price');
+      return;
+    }
+    setDialogOpen(false);
+    setPriceError('');
+    if (onMarkAsSold) onMarkAsSold(numericPrice);
+  };
+
   return (
     <Card
       sx={{
@@ -109,6 +141,9 @@ function ListingCard({
         <Typography variant="h5" color="primary" gutterBottom>
           ${listing.price}
         </Typography>
+        {listing.sold && (
+          <Chip label="Sold" color="success" sx={{ mb: 1 }} />
+        )}
         <Typography
           variant="body2"
           color="text.secondary"
@@ -148,7 +183,7 @@ function ListingCard({
 
       <Box sx={{ p: 2, pt: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {(showEditButton || showDeleteButton) && (
+          {(showEditButton || showDeleteButton || (onMarkAsSold && !listing.sold)) && (
             <>
               {showEditButton && (
                 <IconButton
@@ -162,6 +197,7 @@ function ListingCard({
                       transform: 'scale(0.95)',
                     },
                   }}
+                  disabled={listing.sold}
                 >
                   <EditIcon />
                 </IconButton>
@@ -179,9 +215,21 @@ function ListingCard({
                       transform: 'scale(0.95)',
                     },
                   }}
+                  disabled={listing.sold}
                 >
                   <DeleteIcon />
                 </IconButton>
+              )}
+              {onMarkAsSold && !listing.sold && (
+                <Button
+                  variant="contained"
+                  color="success"
+                  size="small"
+                  onClick={handleMarkAsSoldClick}
+                  sx={{ ml: 1 }}
+                >
+                  Mark as Sold
+                </Button>
               )}
             </>
           )}
@@ -209,6 +257,32 @@ function ListingCard({
           )}
         </Box>
       </Box>
+
+      <Dialog open={dialogOpen} onClose={handleDialogClose}>
+        <Box onClick={e => e.stopPropagation()}>
+          <DialogTitle>Mark as Sold</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Sold Price ($)"
+              type="number"
+              fullWidth
+              value={soldPrice}
+              onChange={e => setSoldPrice(e.target.value)}
+              error={!!priceError}
+              helperText={priceError}
+              inputProps={{ min: 1 }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleDialogClose}>Cancel</Button>
+            <Button onClick={handleDialogConfirm} variant="contained" color="success">
+              Confirm
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
     </Card>
   );
 }

@@ -15,6 +15,7 @@ A platform for students to buy and sell items within their campus community.
 
 - React 18
 - Material-UI
+- Firebase (Authentication, Firestore, Storage, Cloud Functions)
 - React Router
 - Axios for API calls
 
@@ -76,17 +77,59 @@ npm run build
 - `REACT_APP_API_URL`: The URL of your backend API
 - `REACT_APP_ENV`: The environment (development/production)
 
+## Firebase Cloud Functions
+
+The project uses Firebase Cloud Functions to handle secure server-side operations.
+
+### Available Functions
+
+- **handleOfferAccepted**: Automatically updates listing status when an offer is accepted in the messaging system. This runs with admin privileges to securely update listings even when users don't own them.
+- **notifyOfferAccepted**: Sends notifications when an offer is accepted.
+
+### Deploying Functions
+
+1. Install Firebase CLI:
+```bash
+npm install -g firebase-tools
+```
+
+2. Login to Firebase:
+```bash
+firebase login
+```
+
+3. Deploy the functions:
+```bash
+firebase deploy --only functions
+```
+
+### Testing Functions Locally
+
+1. Start the Firebase emulator:
+```bash
+cd functions
+npm run serve
+```
+
+2. This will start the Firebase Functions emulator on port 5001.
+
 ## Project Structure
 
 ```
 src/
-├── components/
+├── components/     # UI components
 │   ├── common/     # Reusable components
 │   ├── forms/      # Form components
 │   └── pages/      # Page components
-├── styles/         # Global styles
+├── services/       # Firebase and API services
+├── contexts/       # React contexts
+├── config/         # Configuration files
+├── utils/          # Utility functions
 ├── App.js          # Main application component
 └── index.js        # Application entry point
+functions/          # Firebase Cloud Functions
+├── index.js        # Cloud Functions entry point
+└── package.json    # Functions dependencies
 ```
 
 ## Contributing

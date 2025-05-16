@@ -16,6 +16,10 @@ import {
   IconButton,
   Stack,
   Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -24,6 +28,7 @@ import { db, storage } from '../../config/firebase';
 import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
 import { auth } from '../../config/firebase';
 import { keyframes } from '@mui/system';
+import { markListingAsSold, unmarkListingAsSold } from '../../services/firestore';
 
 // Add shake animation
 const shake = keyframes`
@@ -62,6 +67,7 @@ function EditListing() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [imageSaveError, setImageSaveError] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [listing, setListing] = useState({
     title: '',
@@ -75,6 +81,11 @@ function EditListing() {
   });
   const [newImages, setNewImages] = useState([]);
   const [imagesToDelete, setImagesToDelete] = useState([]);
+  const [isMarkingSold, setIsMarkingSold] = useState(false);
+  const [isUnmarkingSold, setIsUnmarkingSold] = useState(false);
+  const [soldDialogOpen, setSoldDialogOpen] = useState(false);
+  const [soldPrice, setSoldPrice] = useState('');
+  const [soldPriceError, setSoldPriceError] = useState('');
 
   const fetchListing = useCallback(async () => {
     setLoading(true);
@@ -231,16 +242,21 @@ function EditListing() {
     setLoading(true);
 
     try {
-      // Check if there are any images (either existing or new)
-      if (listing.images.length === 0 && newImages.length === 0) {
+      // Only require an image when saving edits, not when marking as sold
+      if (!listing.sold && listing.images.length === 0 && newImages.length === 0) {
         setImageError(true);
+        setImageSaveError(true);
         setSnackbarOpen(true);
         // Reset image error state after animation completes
         setTimeout(() => {
           setImageError(false);
+          setImageSaveError(false);
         }, 500);
         setLoading(false);
         return;
+      } else {
+        setImageError(false);
+        setImageSaveError(false);
       }
 
       // Upload new images if any
@@ -293,6 +309,47 @@ function EditListing() {
     }
   };
 
+  const handleMarkAsSold = () => {
+    setSoldPrice(listing.price);
+    setSoldDialogOpen(true);
+  };
+
+  const handleSoldDialogClose = () => {
+    setSoldDialogOpen(false);
+    setSoldPriceError('');
+  };
+
+  const handleSoldDialogConfirm = async () => {
+    const numericPrice = Number(String(soldPrice).replace(/,/g, ''));
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      setSoldPriceError('Please enter a valid price');
+      return;
+    }
+    setIsMarkingSold(true);
+    try {
+      await markListingAsSold(id, numericPrice);
+      setListing(prev => ({ ...prev, sold: true, price: numericPrice }));
+      setSoldDialogOpen(false);
+      setSoldPriceError('');
+    } catch (error) {
+      setImageError('Failed to mark as sold');
+    } finally {
+      setIsMarkingSold(false);
+    }
+  };
+
+  const handleUnmarkAsSold = async () => {
+    setIsUnmarkingSold(true);
+    try {
+      await unmarkListingAsSold(id);
+      setListing(prev => ({ ...prev, sold: false }));
+    } catch (error) {
+      setImageError('Failed to unmark as sold');
+    } finally {
+      setIsUnmarkingSold(false);
+    }
+  };
+
   if (loading) {
     return (
       <Container maxWidth="lg">
@@ -309,6 +366,11 @@ function EditListing() {
         <Typography variant="h4" sx={{ fontWeight: 700, mb: 4 }}>
           Edit Listing
         </Typography>
+        {listing.sold && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            This item is marked as sold. You can no longer edit or delete it.
+          </Alert>
+        )}
         <Paper sx={{ p: 4, borderRadius: 3 }}>
           <form onSubmit={handleSubmit}>
             <Grid container spacing={3}>
@@ -320,6 +382,7 @@ function EditListing() {
                   value={listing.title}
                   onChange={handleChange}
                   required
+                  disabled={listing.sold}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -332,6 +395,7 @@ function EditListing() {
                   multiline
                   rows={4}
                   required
+                  disabled={listing.sold}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -347,10 +411,11 @@ function EditListing() {
                     startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
                   }}
                   required
+                  disabled={listing.sold}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
+                <FormControl fullWidth required disabled={listing.sold}>
                   <InputLabel>Category</InputLabel>
                   <Select
                     name="category"
@@ -367,7 +432,7 @@ function EditListing() {
                 </FormControl>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
+                <FormControl fullWidth required disabled={listing.sold}>
                   <InputLabel>Condition</InputLabel>
                   <Select
                     name="condition"
@@ -384,7 +449,7 @@ function EditListing() {
                 </FormControl>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
+                <FormControl fullWidth required disabled={listing.sold}>
                   <InputLabel>Location</InputLabel>
                   <Select
                     name="location"
@@ -409,6 +474,7 @@ function EditListing() {
                     value={listing.customLocation}
                     onChange={handleChange}
                     required
+                    disabled={listing.sold}
                   />
                 </Grid>
               )}
@@ -422,7 +488,7 @@ function EditListing() {
                   sx={{
                     mb: 2,
                     flexWrap: 'wrap',
-                    animation: imageError ? `${shake} 0.5s ease-in-out` : 'none',
+                    animation: imageError && imageSaveError && !listing.sold ? `${shake} 0.5s ease-in-out` : 'none',
                   }}
                 >
                   {listing.images.map((image, index) => (
@@ -512,10 +578,11 @@ function EditListing() {
                       height: 150,
                       borderRadius: 2,
                       mb: 2,
-                      borderColor: imageError ? 'error.main' : 'divider',
+                      borderColor: imageError && imageSaveError && !listing.sold ? 'error.main' : 'divider',
                       '&:hover': {
-                        borderColor: imageError ? 'error.main' : 'primary.main',
+                        borderColor: imageError && imageSaveError && !listing.sold ? 'error.main' : 'primary.main',
                       },
+                      animation: imageError && imageSaveError && !listing.sold ? `${shake} 0.5s ease-in-out` : 'none',
                     }}
                   >
                     Add Image
@@ -538,14 +605,38 @@ function EditListing() {
                   >
                     Cancel
                   </Button>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    disabled={loading}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    {loading ? <CircularProgress size={24} /> : 'Save Changes'}
-                  </Button>
+                  {!listing.sold && (
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={loading}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {loading ? <CircularProgress size={24} /> : 'Save Changes'}
+                    </Button>
+                  )}
+                  {!listing.sold && (
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={handleMarkAsSold}
+                      disabled={isMarkingSold}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {isMarkingSold ? <CircularProgress size={24} /> : 'Mark as Sold'}
+                    </Button>
+                  )}
+                  {listing.sold && (
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      onClick={handleUnmarkAsSold}
+                      disabled={isUnmarkingSold}
+                      sx={{ borderRadius: 2, ml: 2 }}
+                    >
+                      {isUnmarkingSold ? <CircularProgress size={24} /> : 'Unmark as Sold'}
+                    </Button>
+                  )}
                 </Box>
               </Grid>
             </Grid>
@@ -562,6 +653,29 @@ function EditListing() {
           At least one image is required
         </Alert>
       </Snackbar>
+      <Dialog open={soldDialogOpen} onClose={handleSoldDialogClose}>
+        <DialogTitle>Mark as Sold</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Sold Price ($)"
+            type="number"
+            fullWidth
+            value={soldPrice}
+            onChange={e => setSoldPrice(e.target.value)}
+            error={!!soldPriceError}
+            helperText={soldPriceError}
+            inputProps={{ min: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleSoldDialogClose}>Cancel</Button>
+          <Button onClick={handleSoldDialogConfirm} variant="contained" color="success" disabled={isMarkingSold}>
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

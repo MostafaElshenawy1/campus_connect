@@ -16,6 +16,7 @@ import {
   Stack,
   Chip,
   Avatar,
+  Alert,
 } from '@mui/material';
 import {
   Favorite as FavoriteIcon,
@@ -31,6 +32,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { handleLike, getLikeCount, formatLikeCount, checkIfLiked } from '../../services/likes';
 import ListingImageSlider from '../common/ListingImageSlider';
 import { sendMessage } from '../../services/messages';
+import { markListingAsSold, unmarkListingAsSold } from '../../services/firestore';
 
 function ListingDetails() {
   const { id } = useParams();
@@ -46,6 +48,11 @@ function ListingDetails() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [seller, setSeller] = useState(null);
   const [likeCount, setLikeCount] = useState(0);
+  const [isMarkingSold, setIsMarkingSold] = useState(false);
+  const [soldDialogOpen, setSoldDialogOpen] = useState(false);
+  const [soldPrice, setSoldPrice] = useState('');
+  const [soldPriceError, setSoldPriceError] = useState('');
+  const [isUnmarkingSold, setIsUnmarkingSold] = useState(false);
 
   useEffect(() => {
     const fetchListing = async () => {
@@ -291,6 +298,47 @@ function ListingDetails() {
     }
   };
 
+  const handleMarkAsSold = () => {
+    setSoldPrice(listing.price);
+    setSoldDialogOpen(true);
+  };
+
+  const handleSoldDialogClose = () => {
+    setSoldDialogOpen(false);
+    setSoldPriceError('');
+  };
+
+  const handleSoldDialogConfirm = async () => {
+    const numericPrice = Number(String(soldPrice).replace(/,/g, ''));
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      setSoldPriceError('Please enter a valid price');
+      return;
+    }
+    setIsMarkingSold(true);
+    try {
+      await markListingAsSold(id, numericPrice);
+      setListing(prev => ({ ...prev, sold: true, price: numericPrice }));
+      setSoldDialogOpen(false);
+      setSoldPriceError('');
+    } catch (error) {
+      setError('Failed to mark as sold');
+    } finally {
+      setIsMarkingSold(false);
+    }
+  };
+
+  const handleUnmarkAsSold = async () => {
+    setIsUnmarkingSold(true);
+    try {
+      await unmarkListingAsSold(id);
+      setListing(prev => ({ ...prev, sold: false }));
+    } catch (error) {
+      setError('Failed to unmark as sold');
+    } finally {
+      setIsUnmarkingSold(false);
+    }
+  };
+
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -400,11 +448,38 @@ function ListingDetails() {
 
             {isOwner ? (
               <Stack spacing={2}>
+                {listing.sold && (
+                  <>
+                    <Chip label="Sold" color="success" sx={{ mb: 1 }} />
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      onClick={handleUnmarkAsSold}
+                      disabled={isUnmarkingSold}
+                      sx={{ mb: 1 }}
+                    >
+                      {isUnmarkingSold ? <CircularProgress size={24} /> : 'Unmark as Sold'}
+                    </Button>
+                  </>
+                )}
+                {!listing.sold && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleMarkAsSold}
+                    fullWidth
+                    disabled={isMarkingSold}
+                    sx={{ mb: 1 }}
+                  >
+                    {isMarkingSold ? <CircularProgress size={24} /> : 'Mark as Sold'}
+                  </Button>
+                )}
                 <Button
                   variant="contained"
                   startIcon={<EditIcon />}
                   onClick={handleEdit}
                   fullWidth
+                  disabled={listing.sold}
                 >
                   Edit Listing
                 </Button>
@@ -414,27 +489,50 @@ function ListingDetails() {
                   startIcon={<DeleteIcon />}
                   onClick={() => setDeleteDialogOpen(true)}
                   fullWidth
+                  disabled={listing.sold}
                 >
                   Delete Listing
                 </Button>
               </Stack>
             ) : (
               <Stack spacing={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  fullWidth
-                  onClick={() => setOfferDialogOpen(true)}
-                >
-                  Send an Offer
-                </Button>
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  onClick={() => setMessageDialogOpen(true)}
-                >
-                  Message Seller
-                </Button>
+                {listing.sold ? (
+                  <Box sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    bgcolor: 'background.paper',
+                    border: '1.5px solid',
+                    borderColor: 'success.light',
+                    borderRadius: 2,
+                    px: 2,
+                    py: 2,
+                    boxShadow: 1,
+                    gap: 2,
+                  }}>
+                    <Chip label="Sold" color="success" sx={{ fontWeight: 700, fontSize: 16, px: 1.5, height: 32 }} />
+                    <Typography variant="subtitle1" color="success.main" sx={{ fontWeight: 600 }}>
+                      This item has already been sold.
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      fullWidth
+                      onClick={() => setOfferDialogOpen(true)}
+                    >
+                      Send an Offer
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      onClick={() => setMessageDialogOpen(true)}
+                    >
+                      Message Seller
+                    </Button>
+                  </>
+                )}
               </Stack>
             )}
           </Paper>
@@ -513,6 +611,31 @@ function ListingDetails() {
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleDelete} color="error" variant="contained">
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Sold Price Dialog */}
+      <Dialog open={soldDialogOpen} onClose={handleSoldDialogClose}>
+        <DialogTitle>Mark as Sold</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Sold Price ($)"
+            type="number"
+            fullWidth
+            value={soldPrice}
+            onChange={e => setSoldPrice(e.target.value)}
+            error={!!soldPriceError}
+            helperText={soldPriceError}
+            inputProps={{ min: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleSoldDialogClose}>Cancel</Button>
+          <Button onClick={handleSoldDialogConfirm} variant="contained" color="success" disabled={isMarkingSold}>
+            Confirm
           </Button>
         </DialogActions>
       </Dialog>

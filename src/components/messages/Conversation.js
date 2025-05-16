@@ -15,7 +15,7 @@ import {
   CardActions
 } from '@mui/material';
 import { Send as SendIcon, AttachMoney as MoneyIcon } from '@mui/icons-material';
-import { getMessages, sendMessage, handleOfferResponse, markMessageAsRead } from '../../services/messages';
+import { getMessages, sendMessage, handleOfferResponse as handleOfferResponseService, markMessageAsRead } from '../../services/messages';
 import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { auth } from '../../config/firebase';
@@ -80,14 +80,20 @@ const Message = ({ message, isOwnMessage, onOfferResponse }) => {
                 <Button
                   size="small"
                   color="primary"
-                  onClick={() => onOfferResponse(message.id, true)}
+                  onClick={() => {
+                    console.debug('Accept button clicked for message', message.id);
+                    onOfferResponse(message.id, true);
+                  }}
                 >
                   Accept
                 </Button>
                 <Button
                   size="small"
                   color="error"
-                  onClick={() => onOfferResponse(message.id, false)}
+                  onClick={() => {
+                    console.debug('Reject button clicked for message', message.id);
+                    onOfferResponse(message.id, false);
+                  }}
                 >
                   Reject
                 </Button>
@@ -183,52 +189,56 @@ const Conversation = () => {
     }
   };
 
-  const handleOfferResponse = async (messageId, accept) => {
+    const handleOfferResponse = async (messageId, accept) => {
     try {
-      const messageRef = doc(db, 'messages', messageId);
-      const messageDoc = await getDoc(messageRef);
+      console.debug('[Conversation] handleOfferResponse called with', { messageId, accept, userId });
 
-      if (!messageDoc.exists()) {
-        throw new Error('Message not found');
+      // Optimistically update the UI first
+      setMessages(prevMessages =>
+        prevMessages.map(msg => {
+          if (msg.id === messageId) {
+            console.debug('[Conversation] Optimistically updating local message', {
+              id: msg.id,
+              oldStatus: msg.status,
+              newStatus: accept ? 'accepted' : 'rejected'
+            });
+            return { ...msg, status: accept ? 'accepted' : 'rejected' };
+          }
+          return msg;
+        })
+      );
+
+      // Call the service function to handle the offer response
+      const result = await handleOfferResponseService(userId, messageId, accept);
+      console.debug('[Conversation] Result from handleOfferResponseService:', result);
+
+      // Even if there was only partial success, we'll still refresh the messages
+      // to ensure consistency with what's in the database
+      try {
+        const updatedMessages = await getMessages(userId);
+        setMessages(updatedMessages);
+      } catch (refreshError) {
+        console.error('[Conversation] Error refreshing messages:', refreshError);
+        // Continue execution - the optimistic update is still showing
       }
 
-      const messageData = messageDoc.data();
-      const offerAmount = messageData.offerAmount;
-
-      if (accept) {
-        // Create a new message indicating acceptance
-        await addDoc(collection(db, 'messages'), {
-          conversationId: messageData.conversationId,
-          senderId: auth.currentUser.uid,
-          receiverId: messageData.senderId,
-          content: `Accepted offer of $${offerAmount}`,
-          timestamp: serverTimestamp(),
-          type: 'offer_response',
-          accepted: true,
-          offerAmount: offerAmount
-        });
-      } else {
-        // Create a new message indicating rejection
-        await addDoc(collection(db, 'messages'), {
-          conversationId: messageData.conversationId,
-          senderId: auth.currentUser.uid,
-          receiverId: messageData.senderId,
-          content: `Rejected offer of $${offerAmount}`,
-          timestamp: serverTimestamp(),
-          type: 'offer_response',
-          accepted: false,
-          offerAmount: offerAmount
-        });
+      if (result?.partial) {
+        console.warn('[Conversation] Partial success:', result.message);
+        // Could show a notification here
       }
-
-      // Update the original offer message to mark it as responded
-      await updateDoc(messageRef, {
-        responded: true,
-        response: accept ? 'accepted' : 'rejected'
-      });
-
     } catch (error) {
-      console.error('Error handling offer response:', error);
+      console.error('[Conversation] Error handling offer response:', error);
+
+      // Revert optimistic update if we had a complete failure
+      setMessages(prevMessages =>
+        prevMessages.map(msg => {
+          if (msg.id === messageId) {
+            console.debug('[Conversation] Reverting optimistic update due to error');
+            return { ...msg, status: 'pending' }; // Revert to pending
+          }
+          return msg;
+        })
+      );
     }
   };
 

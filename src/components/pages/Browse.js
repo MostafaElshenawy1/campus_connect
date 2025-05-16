@@ -73,6 +73,9 @@ function Browse() {
   const applyFiltersAndSort = useCallback(async () => {
     let filteredListings = [...allListings];
 
+    // Exclude sold listings
+    filteredListings = filteredListings.filter(listing => !listing.sold);
+
     if (searchQuery.trim()) {
       const searchLower = searchQuery.toLowerCase().trim();
       filteredListings = filteredListings.filter(listing =>
@@ -167,11 +170,13 @@ function Browse() {
       const listingsRef = collection(db, 'listings');
       const q = query(listingsRef, orderBy('createdAt', 'desc'));
       const querySnapshot = await getDocs(q);
-      const listingsData = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        likes: doc.data().likes || 0
-      }));
+      const listingsData = querySnapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          likes: doc.data().likes || 0
+        }))
+        .filter(listing => !listing.sold);
       setAllListings(listingsData);
       setDisplayedListings(listingsData);
       setError(null);

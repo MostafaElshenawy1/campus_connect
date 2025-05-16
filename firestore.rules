@@ -44,13 +44,16 @@ service cloud.firestore {
     match /listings/{listingId} {
       allow read: if true;
       allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() &&
-                             (
-                               // Allow if user is the owner
-                               resource.data.userId == request.auth.uid ||
-                               // Or if updating specific fields like likes
-                               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'sold', 'soldTo', 'soldAt'])
-                             );
+      // Allow update and delete if:
+      // - The user is the owner (can update/delete anything)
+      // - The user is NOT the owner, but only updating sold, soldTo, soldAt, and price
+      allow update, delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        (
+          resource.data.userId != request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sold', 'soldTo', 'soldAt', 'price'])
+        )
+      );
     }
   }
 }

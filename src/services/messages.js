@@ -180,6 +180,10 @@ export const handleOfferResponse = async (conversationId, messageId, accept) => 
   if (!currentUserId) throw new Error('User not authenticated');
 
   try {
+    console.debug('[handleOfferResponse] Starting with params:', {
+      conversationId, messageId, accept, currentUserId
+    });
+
     const conversationRef = doc(db, 'conversations', conversationId);
     const messageRef = doc(conversationRef, 'messages', messageId);
 
@@ -189,6 +193,8 @@ export const handleOfferResponse = async (conversationId, messageId, accept) => 
     }
 
     const message = messageDoc.data();
+    console.debug('[handleOfferResponse] Message data:', message);
+
     if (!message.isOffer) {
       throw new Error('This message is not an offer');
     }
@@ -197,30 +203,29 @@ export const handleOfferResponse = async (conversationId, messageId, accept) => 
       throw new Error('Only the receiver can respond to an offer');
     }
 
-    const batch = writeBatch(db);
-
-    // Update message status
-    batch.update(messageRef, {
+    // Update the message status - this will trigger the Cloud Function if accepted
+    console.debug('[handleOfferResponse] Updating message status');
+    await updateDoc(messageRef, {
       status: accept ? 'accepted' : 'rejected'
     });
 
+    console.debug('[handleOfferResponse] Message status updated successfully');
+
     // Update conversation's last message
-    batch.update(conversationRef, {
+    console.debug('[handleOfferResponse] Updating conversation last message');
+    await updateDoc(conversationRef, {
       'lastMessage.status': accept ? 'accepted' : 'rejected'
     });
 
-    if (accept && message.listingId) {
-      // Mark the listing as sold
-      const listingRef = doc(db, 'listings', message.listingId);
-      batch.update(listingRef, {
-        sold: true,
-        soldTo: message.senderId,
-        soldAt: serverTimestamp()
-      });
-    }
+    console.debug('[handleOfferResponse] Conversation updated successfully');
+    console.debug('[handleOfferResponse] Cloud Function will handle listing update if needed');
 
-    await batch.commit();
-    return { success: true };
+    return {
+      success: true,
+      message: accept ?
+        "Offer accepted. The item will be marked as sold automatically." :
+        "Offer rejected successfully."
+    };
   } catch (error) {
     console.error('Error handling offer response:', error);
     throw error;

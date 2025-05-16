@@ -105,6 +105,34 @@ export const deleteListing = async (id) => {
   }
 };
 
+export const markListingAsSold = async (id, soldPrice) => {
+  try {
+    const docRef = doc(db, 'listings', id);
+    await updateDoc(docRef, {
+      sold: true,
+      soldAt: serverTimestamp(),
+      price: soldPrice,
+    });
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const unmarkListingAsSold = async (id) => {
+  try {
+    const docRef = doc(db, 'listings', id);
+    await updateDoc(docRef, {
+      sold: false,
+      soldAt: null,
+      soldTo: null,
+      // Optionally, you can keep the price or set it to null
+      // price: null,
+    });
+  } catch (error) {
+    throw error;
+  }
+};
+
 // Users
 export const usersCollection = collection(db, 'users');
 

@@ -23,7 +23,7 @@ import {
   Container
 } from '@mui/material';
 import { Send as SendIcon, AttachMoney as AttachMoneyIcon, ArrowBack as ArrowBackIcon, ChatBubbleOutline as ChatBubbleIcon } from '@mui/icons-material';
-import { sendMessage, handleOfferResponse } from '../../services/conversations';
+import { sendMessage, handleOfferResponse } from '../../services/messages';
 import { formatDistanceToNow } from 'date-fns';
 import { getAuth } from 'firebase/auth';
 import {
@@ -34,10 +34,11 @@ import {
   orderBy,
   doc,
   getDoc,
-  writeBatch
+  writeBatch,
+  updateDoc
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const Messages = () => {
   const theme = useTheme();
@@ -58,6 +59,7 @@ const Messages = () => {
   const location = useLocation();
   const [counterOfferAmount, setCounterOfferAmount] = useState('');
   const [counterOfferMessage, setCounterOfferMessage] = useState('');
+  const navigate = useNavigate();
 
   useEffect(() => {
     const auth = getAuth();
@@ -151,7 +153,7 @@ const Messages = () => {
         id: doc.id,
         ...doc.data()
       }));
-
+      console.debug('[onSnapshot] Messages data:', messagesData.map(m => ({ id: m.id, status: m.status })));
       // Update both messages state and allMessages cache
       setMessages(messagesData);
       setAllMessages(prev => ({
@@ -289,11 +291,90 @@ const Messages = () => {
     }
   };
 
-  const respondToOffer = async (messageId, status) => {
+    const respondToOffer = async (messageId, status) => {
     try {
-      await handleOfferResponse(selectedConversation.id, messageId, status);
+      console.debug('[respondToOffer] Called with', { messageId, status });
+
+      // Optimistically update the message status in local state first for better UX
+      setMessages(prevMessages =>
+        prevMessages.map(msg => {
+          if (msg.id === messageId) {
+            console.debug('[respondToOffer] Optimistically updating local message status', {
+              id: msg.id, oldStatus: msg.status, newStatus: status
+            });
+            return { ...msg, status: status };
+          }
+          return msg;
+        })
+      );
+
+      // Pass boolean to handleOfferResponse: true for accept, false for reject
+      const accept = status === 'accepted';
+      console.debug('[respondToOffer] Calling handleOfferResponse with', {
+        conversationId: selectedConversation.id,
+        messageId,
+        accept
+      });
+
+      // Call the service to update in database
+      const result = await handleOfferResponse(selectedConversation.id, messageId, accept);
+      console.debug('[respondToOffer] Result from handleOfferResponse:', result);
+
+      // If this was an accepted offer, update the conversation's listing in local state if it exists
+      if (accept && selectedConversation.listing) {
+        // Update UI immediately for better user experience
+        // The Cloud Function will handle the actual database update
+        const updatedListing = {
+          ...selectedConversation.listing,
+          sold: true,
+          soldAt: new Date(),
+          soldTo: getAuth().currentUser.uid
+        };
+
+        // If there's an offer amount, update the price in our local state
+        const message = messages.find(m => m.id === messageId);
+        if (message && message.offerAmount) {
+          updatedListing.price = Number(message.offerAmount);
+        }
+
+        console.debug('[respondToOffer] Updating local listing state:', updatedListing);
+
+        // Update the selected conversation's listing
+        setSelectedConversation(prev => ({
+          ...prev,
+          listing: updatedListing
+        }));
+
+        // Update the listing in all conversations too (to keep state consistent)
+        setConversations(prevConversations =>
+          prevConversations.map(conv =>
+            conv.id === selectedConversation.id ?
+              { ...conv, listing: updatedListing } :
+              conv
+          )
+        );
+      }
+
+      if (result?.message) {
+        console.info('[respondToOffer] Server message:', result.message);
+        // TODO: Show a toast notification with the result message
+      }
     } catch (error) {
       console.error('Error handling offer response:', error);
+
+      // Revert the optimistic update if we had a complete failure
+      setMessages(prevMessages =>
+        prevMessages.map(msg => {
+          if (msg.id === messageId) {
+            console.debug('[respondToOffer] Reverting local message status due to error');
+            return { ...msg, status: 'pending' }; // Revert to pending
+          }
+          return msg;
+        })
+      );
+
+      // TODO: Show error toast notification
+      // Example: toast.error("Failed to process your response to the offer. Please try again.");
     }
   };
 
@@ -303,7 +384,7 @@ const Messages = () => {
       setMessages(prevMessages =>
         prevMessages.map(msg =>
           msg.id === messageId
-            ? { ...msg, status: 'rescinded' }
+            ? { ...msg, status: 'pending' }
             : msg
         )
       );
@@ -358,6 +439,7 @@ const Messages = () => {
     const isOffer = message.isOffer;
     const isPending = message.status === 'pending';
     const isRescinded = message.status === 'rescinded';
+    const isCountered = message.status === 'countered';
 
     const getStatusColor = (status) => {
       switch (status) {
@@ -367,6 +449,8 @@ const Messages = () => {
           return 'error.main';
         case 'rescinded':
           return 'text.secondary';
+        case 'countered':
+          return 'info.main';
         default:
           return isCurrentUser ? 'text.secondary' : 'rgba(255, 255, 255, 0.7)';
       }
@@ -380,6 +464,8 @@ const Messages = () => {
           return 'Offer rejected';
         case 'rescinded':
           return 'Offer rescinded';
+        case 'countered':
+          return 'Offer countered';
         default:
           return `Offer ${status}`;
       }
@@ -416,7 +502,7 @@ const Messages = () => {
                 {message.content}
               </Typography>
 
-              {isPending && (
+              {isPending && !isCountered && (
                 <Box sx={{ mt: 1 }}>
                   {isCurrentUser ? (
                     <Button
@@ -474,17 +560,31 @@ const Messages = () => {
                 </Box>
               )}
 
-              {!isPending && (
+              {isCountered && (
                 <Typography
                   variant="caption"
                   sx={{
                     mt: 1,
                     display: 'block',
-                    color: getStatusColor(message.status),
+                    color: 'info.main',
                     fontStyle: 'italic'
                   }}
                 >
-                  {getStatusText(message.status)}
+                  Countered
+                </Typography>
+              )}
+
+              {!isPending && !isCountered && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    mt: 1,
+                    display: 'block',
+                    color: message.status === 'rejected' ? 'error.main' : getStatusColor(message.status),
+                    fontStyle: 'italic'
+                  }}
+                >
+                  {message.status === 'rejected' ? 'Offer rejected' : getStatusText(message.status)}
                 </Typography>
               )}
             </Box>
@@ -731,6 +831,19 @@ const Messages = () => {
         );
       }
 
+      // Update the original offer's status to 'countered' in Firestore and local state
+      if (selectedOfferMessage?.id) {
+        const conversationId = selectedConversation.id;
+        const messageId = selectedOfferMessage.id;
+        const messageRef = doc(db, `conversations/${conversationId}/messages/${messageId}`);
+        await updateDoc(messageRef, { status: 'countered' });
+        setMessages(prevMessages =>
+          prevMessages.map(msg =>
+            msg.id === messageId ? { ...msg, status: 'countered' } : msg
+          )
+        );
+      }
+
       setCounterOfferDialogOpen(false);
       setCounterOfferAmount('');
       setCounterOfferMessage('');
@@ -926,7 +1039,14 @@ const Messages = () => {
                 borderColor: 'divider',
                 bgcolor: '#1a1f2c',
                 color: 'white',
-                borderRadius: 0
+                borderRadius: 0,
+                cursor: selectedConversation?.listing?.id ? 'pointer' : 'default',
+                '&:hover': selectedConversation?.listing?.id ? { bgcolor: '#23273a' } : {},
+              }}
+              onClick={() => {
+                if (selectedConversation?.listing?.id) {
+                  navigate(`/listings/${selectedConversation.listing.id}`);
+                }
               }}
             >
               <Stack direction="row" spacing={2} alignItems="center" sx={{ width: '100%' }}>

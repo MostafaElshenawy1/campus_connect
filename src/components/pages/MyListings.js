@@ -18,6 +18,7 @@ import { collection, query, where, getDocs, deleteDoc, doc, getDoc } from 'fireb
 import { db, auth } from '../../config/firebase';
 import ListingCard from '../common/ListingCard';
 import { handleLike } from '../../services/likes';
+import { markListingAsSold } from '../../services/firestore';
 
 function MyListings() {
   const [listings, setListings] = useState([]);
@@ -126,6 +127,15 @@ function MyListings() {
     }
   };
 
+  const handleMarkAsSold = async (listingId, soldPrice) => {
+    try {
+      await markListingAsSold(listingId, soldPrice);
+      setListings(prev => prev.map(l => l.id === listingId ? { ...l, sold: true, price: soldPrice } : l));
+    } catch (error) {
+      setError('Failed to mark as sold');
+    }
+  };
+
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -167,8 +177,8 @@ function MyListings() {
             <ListingCard
               listing={listing}
               showLikeButton={true}
-              showEditButton={true}
-              showDeleteButton={true}
+              showEditButton={!listing.sold}
+              showDeleteButton={!listing.sold}
               isLiked={likedListings.includes(listing.id)}
               onLike={handleLikeClick}
               onEdit={handleEdit}
@@ -176,6 +186,7 @@ function MyListings() {
                 setSelectedListing(listing);
                 setDeleteDialogOpen(true);
               }}
+              onMarkAsSold={(soldPrice) => handleMarkAsSold(listing.id, soldPrice)}
             />
           </Grid>
         ))}
