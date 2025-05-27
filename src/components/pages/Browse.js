@@ -122,6 +122,17 @@ function Browse() {
       case 'oldest':
         filteredListings.sort((a, b) => a.createdAt - b.createdAt);
         break;
+      case 'trending':
+        filteredListings.sort((a, b) => {
+          const likesA = a.likes || 0;
+          const likesB = b.likes || 0;
+          if (likesA === likesB) {
+            // If likes are equal, sort by creation date (newest first)
+            return b.createdAt - a.createdAt;
+          }
+          return likesB - likesA;
+        });
+        break;
       case 'price-asc':
         filteredListings.sort((a, b) => a.price - b.price);
         break;
@@ -508,7 +519,11 @@ function Browse() {
                 onClick={handleFilterClick}
                 endIcon={<FilterIcon />}
               >
-                Sort By
+                Sort By: {sortBy === 'newest' ? 'Newest First' :
+                  sortBy === 'oldest' ? 'Oldest First' :
+                    sortBy === 'trending' ? 'Trending' :
+                      sortBy === 'price-asc' ? 'Price: Low to High' :
+                        'Price: High to Low'}
               </Button>
             </Box>
           </Grid>
@@ -531,6 +546,12 @@ function Browse() {
             <TimeIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Oldest First</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleSortChange('trending')}>
+          <ListItemIcon>
+            <TrendingUpIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Trending</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => handleSortChange('price-asc')}>
           <ListItemIcon>
